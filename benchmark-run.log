@@ -1,0 +1,579 @@
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.10kB done
+#1 DONE 0.0s
+
+#2 [with-package internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.27kB done
+#2 DONE 0.0s
+
+#3 [without-package internal] load build definition from Dockerfile
+#3 transferring dockerfile: 832B done
+#3 DONE 0.0s
+
+#4 [without-package internal] load metadata for docker.io/library/php:8.3-cli
+#4 ...
+
+#5 [without-package internal] load metadata for docker.io/library/composer:2
+#5 DONE 1.9s
+
+#4 [without-package internal] load metadata for docker.io/library/php:8.3-cli
+#4 DONE 5.3s
+
+#6 [with-package internal] load .dockerignore
+#6 transferring context: 100B done
+#6 DONE 0.0s
+
+#7 [without-package] FROM docker.io/library/composer:2@sha256:743aebe48ca67097c36819040633ea77e44a561eca135e4fc84c002e63a1ba07
+#7 DONE 0.0s
+
+#8 [without-package stage-0 1/8] FROM docker.io/library/php:8.3-cli@sha256:494cd3d0a27ccff4c8ed2aebe6672d72296671c940399a3e62d17ac47e5c7c58
+#8 DONE 0.0s
+
+#9 [with-package internal] load build context
+#9 transferring context: 8.38kB done
+#9 DONE 0.0s
+
+#10 [without-package internal] load build context
+#10 transferring context: 127B done
+#10 DONE 0.0s
+
+#11 [with-package stage-0 3/9] RUN apt-get update     && apt-get install -y --no-install-recommends autoconf 		dpkg-dev 		file 		g++ 		gcc 		libc-dev 		make 		pkg-config 		re2c git unzip zip     && pecl channel-update pecl.php.net     && printf '\n' | pecl install apcu-5.1.24     && docker-php-ext-enable apcu     && rm -rf /var/lib/apt/lists/*
+#11 CACHED
+
+#12 [with-package stage-0 4/9] WORKDIR /var/www
+#12 CACHED
+
+#13 [without-package stage-0 7/8] RUN composer require predis/predis:^2.2 --no-interaction     && printf '\nAPP_ENV=local\nAPP_DEBUG=true\nSESSION_DRIVER=array\nQUEUE_CONNECTION=sync\nCACHE_STORE=redis\nREDIS_CLIENT=predis\nREDIS_HOST=redis\n' >> .env     && php artisan key:generate --force --ansi     && php artisan config:clear --ansi
+#13 CACHED
+
+#14 [without-package stage-0 4/8] WORKDIR /var/www
+#14 CACHED
+
+#15 [without-package stage-0 3/8] RUN apt-get update     && apt-get install -y --no-install-recommends git unzip zip     && rm -rf /var/lib/apt/lists/*
+#15 CACHED
+
+#16 [without-package stage-0 6/8] WORKDIR /var/www/demo
+#16 CACHED
+
+#17 [without-package stage-0 5/8] RUN composer create-project laravel/laravel demo "^12.0" --prefer-dist --no-interaction
+#17 CACHED
+
+#18 [without-package stage-0 2/8] COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+#18 CACHED
+
+#19 [without-package stage-0 8/8] COPY docker/without-package/routes.web.php /var/www/demo/routes/web.php
+#19 CACHED
+
+#20 [without-package] exporting to image
+#20 exporting layers done
+#20 writing image sha256:79a31cd120f2943edeb38886c9183214447205dcce088e41e5dbd7d73b5b07be 0.0s done
+#20 naming to docker.io/library/hybrid-cache-without-package 0.0s done
+#20 DONE 0.0s
+
+#21 [with-package stage-0 5/9] COPY . /opt/hybrid-cache
+#21 DONE 0.1s
+
+#22 [without-package] resolving provenance for metadata file
+#22 DONE 0.0s
+
+#23 [with-package stage-0 6/9] RUN composer create-project laravel/laravel demo "^12.0" --prefer-dist --no-interaction
+#23 0.252 Creating a "laravel/laravel" project at "./demo"
+#23 1.288 Installing laravel/laravel (v12.12.2)
+#23 1.294   - Downloading laravel/laravel (v12.12.2)
+#23 4.145   - Installing laravel/laravel (v12.12.2): Extracting archive
+#23 5.162 Created project in /var/www/demo
+#23 5.175 > @php -r "file_exists('.env') || copy('.env.example', '.env');"
+#23 5.190 Loading composer repositories with package information
+#23 11.51 Updating dependencies
+#23 11.55 Lock file operations: 111 installs, 0 updates, 0 removals
+#23 11.55   - Locking brick/math (0.14.8)
+#23 11.55   - Locking carbonphp/carbon-doctrine-types (3.2.0)
+#23 11.55   - Locking dflydev/dot-access-data (v3.0.3)
+#23 11.55   - Locking doctrine/inflector (2.1.0)
+#23 11.55   - Locking doctrine/lexer (3.0.1)
+#23 11.55   - Locking dragonmantank/cron-expression (v3.6.0)
+#23 11.55   - Locking egulias/email-validator (4.0.4)
+#23 11.55   - Locking fakerphp/faker (v1.24.1)
+#23 11.55   - Locking filp/whoops (2.18.4)
+#23 11.55   - Locking fruitcake/php-cors (v1.4.0)
+#23 11.55   - Locking graham-campbell/result-type (v1.1.4)
+#23 11.55   - Locking guzzlehttp/guzzle (7.10.0)
+#23 11.55   - Locking guzzlehttp/promises (2.3.0)
+#23 11.55   - Locking guzzlehttp/psr7 (2.9.0)
+#23 11.55   - Locking guzzlehttp/uri-template (v1.0.5)
+#23 11.55   - Locking hamcrest/hamcrest-php (v2.1.1)
+#23 11.55   - Locking laravel/framework (v12.56.0)
+#23 11.55   - Locking laravel/pail (v1.2.6)
+#23 11.55   - Locking laravel/pint (v1.29.0)
+#23 11.55   - Locking laravel/prompts (v0.3.16)
+#23 11.55   - Locking laravel/sail (v1.56.0)
+#23 11.55   - Locking laravel/serializable-closure (v2.0.10)
+#23 11.55   - Locking laravel/tinker (v2.11.1)
+#23 11.55   - Locking league/commonmark (2.8.2)
+#23 11.55   - Locking league/config (v1.2.0)
+#23 11.55   - Locking league/flysystem (3.33.0)
+#23 11.55   - Locking league/flysystem-local (3.31.0)
+#23 11.55   - Locking league/mime-type-detection (1.16.0)
+#23 11.55   - Locking league/uri (7.8.1)
+#23 11.55   - Locking league/uri-interfaces (7.8.1)
+#23 11.55   - Locking mockery/mockery (1.6.12)
+#23 11.55   - Locking monolog/monolog (3.10.0)
+#23 11.55   - Locking myclabs/deep-copy (1.13.4)
+#23 11.55   - Locking nesbot/carbon (3.11.4)
+#23 11.55   - Locking nette/schema (v1.3.5)
+#23 11.55   - Locking nette/utils (v4.1.3)
+#23 11.55   - Locking nikic/php-parser (v5.7.0)
+#23 11.55   - Locking nunomaduro/collision (v8.9.3)
+#23 11.55   - Locking nunomaduro/termwind (v2.4.0)
+#23 11.55   - Locking phar-io/manifest (2.0.4)
+#23 11.55   - Locking phar-io/version (3.2.1)
+#23 11.55   - Locking phpoption/phpoption (1.9.5)
+#23 11.55   - Locking phpunit/php-code-coverage (11.0.12)
+#23 11.55   - Locking phpunit/php-file-iterator (5.1.1)
+#23 11.55   - Locking phpunit/php-invoker (5.0.1)
+#23 11.55   - Locking phpunit/php-text-template (4.0.1)
+#23 11.55   - Locking phpunit/php-timer (7.0.1)
+#23 11.55   - Locking phpunit/phpunit (11.5.55)
+#23 11.55   - Locking psr/clock (1.0.0)
+#23 11.55   - Locking psr/container (2.0.2)
+#23 11.55   - Locking psr/event-dispatcher (1.0.0)
+#23 11.55   - Locking psr/http-client (1.0.3)
+#23 11.55   - Locking psr/http-factory (1.1.0)
+#23 11.55   - Locking psr/http-message (2.0)
+#23 11.55   - Locking psr/log (3.0.2)
+#23 11.55   - Locking psr/simple-cache (3.0.0)
+#23 11.55   - Locking psy/psysh (v0.12.22)
+#23 11.55   - Locking ralouphie/getallheaders (3.0.3)
+#23 11.55   - Locking ramsey/collection (2.1.1)
+#23 11.55   - Locking ramsey/uuid (4.9.2)
+#23 11.55   - Locking sebastian/cli-parser (3.0.2)
+#23 11.55   - Locking sebastian/code-unit (3.0.3)
+#23 11.55   - Locking sebastian/code-unit-reverse-lookup (4.0.1)
+#23 11.55   - Locking sebastian/comparator (6.3.3)
+#23 11.55   - Locking sebastian/complexity (4.0.1)
+#23 11.55   - Locking sebastian/diff (6.0.2)
+#23 11.55   - Locking sebastian/environment (7.2.1)
+#23 11.55   - Locking sebastian/exporter (6.3.2)
+#23 11.55   - Locking sebastian/global-state (7.0.2)
+#23 11.55   - Locking sebastian/lines-of-code (3.0.1)
+#23 11.55   - Locking sebastian/object-enumerator (6.0.1)
+#23 11.55   - Locking sebastian/object-reflector (4.0.1)
+#23 11.55   - Locking sebastian/recursion-context (6.0.3)
+#23 11.55   - Locking sebastian/type (5.1.3)
+#23 11.55   - Locking sebastian/version (5.0.2)
+#23 11.55   - Locking staabm/side-effects-detector (1.0.5)
+#23 11.55   - Locking symfony/clock (v7.4.8)
+#23 11.55   - Locking symfony/console (v7.4.8)
+#23 11.55   - Locking symfony/css-selector (v7.4.8)
+#23 11.55   - Locking symfony/deprecation-contracts (v3.6.0)
+#23 11.55   - Locking symfony/error-handler (v7.4.8)
+#23 11.55   - Locking symfony/event-dispatcher (v7.4.8)
+#23 11.55   - Locking symfony/event-dispatcher-contracts (v3.6.0)
+#23 11.55   - Locking symfony/finder (v7.4.8)
+#23 11.55   - Locking symfony/http-foundation (v7.4.8)
+#23 11.55   - Locking symfony/http-kernel (v7.4.8)
+#23 11.55   - Locking symfony/mailer (v7.4.8)
+#23 11.55   - Locking symfony/mime (v7.4.8)
+#23 11.55   - Locking symfony/polyfill-ctype (v1.33.0)
+#23 11.55   - Locking symfony/polyfill-intl-grapheme (v1.33.0)
+#23 11.55   - Locking symfony/polyfill-intl-idn (v1.33.0)
+#23 11.55   - Locking symfony/polyfill-intl-normalizer (v1.33.0)
+#23 11.55   - Locking symfony/polyfill-mbstring (v1.33.0)
+#23 11.55   - Locking symfony/polyfill-php80 (v1.33.0)
+#23 11.55   - Locking symfony/polyfill-php83 (v1.33.0)
+#23 11.55   - Locking symfony/polyfill-php84 (v1.33.0)
+#23 11.55   - Locking symfony/polyfill-php85 (v1.33.0)
+#23 11.55   - Locking symfony/polyfill-uuid (v1.33.0)
+#23 11.55   - Locking symfony/process (v7.4.8)
+#23 11.55   - Locking symfony/routing (v7.4.8)
+#23 11.55   - Locking symfony/service-contracts (v3.6.1)
+#23 11.55   - Locking symfony/string (v7.4.8)
+#23 11.55   - Locking symfony/translation (v7.4.8)
+#23 11.55   - Locking symfony/translation-contracts (v3.6.1)
+#23 11.55   - Locking symfony/uid (v7.4.8)
+#23 11.55   - Locking symfony/var-dumper (v7.4.8)
+#23 11.55   - Locking symfony/yaml (v7.4.8)
+#23 11.55   - Locking theseer/tokenizer (1.3.1)
+#23 11.55   - Locking tijsverkoyen/css-to-inline-styles (v2.4.0)
+#23 11.55   - Locking vlucas/phpdotenv (v5.6.3)
+#23 11.55   - Locking voku/portable-ascii (2.0.3)
+#23 11.55 Writing lock file
+#23 11.55 Installing dependencies from lock file (including require-dev)
+#23 11.56 Package operations: 111 installs, 0 updates, 0 removals
+#23 11.56   - Downloading doctrine/inflector (2.1.0)
+#23 11.56   - Downloading doctrine/lexer (3.0.1)
+#23 11.56   - Downloading dragonmantank/cron-expression (v3.6.0)
+#23 11.56   - Downloading symfony/deprecation-contracts (v3.6.0)
+#23 11.56   - Downloading psr/container (2.0.2)
+#23 11.56   - Downloading fakerphp/faker (v1.24.1)
+#23 11.56   - Downloading symfony/polyfill-mbstring (v1.33.0)
+#23 11.56   - Downloading symfony/http-foundation (v7.4.8)
+#23 11.56   - Downloading fruitcake/php-cors (v1.4.0)
+#23 11.56   - Downloading psr/http-message (2.0)
+#23 11.56   - Downloading psr/http-client (1.0.3)
+#23 11.56   - Downloading ralouphie/getallheaders (3.0.3)
+#23 11.56   - Downloading psr/http-factory (1.1.0)
+#23 11.56   - Downloading guzzlehttp/psr7 (2.9.0)
+#23 11.56   - Downloading guzzlehttp/promises (2.3.0)
+#23 11.56   - Downloading guzzlehttp/guzzle (7.10.0)
+#23 11.56   - Downloading symfony/polyfill-php80 (v1.33.0)
+#23 11.56   - Downloading guzzlehttp/uri-template (v1.0.5)
+#23 11.56   - Downloading symfony/polyfill-intl-normalizer (v1.33.0)
+#23 11.56   - Downloading symfony/polyfill-intl-grapheme (v1.33.0)
+#23 11.56   - Downloading symfony/polyfill-ctype (v1.33.0)
+#23 11.56   - Downloading symfony/string (v7.4.8)
+#23 11.56   - Downloading symfony/service-contracts (v3.6.1)
+#23 11.56   - Downloading symfony/console (v7.4.8)
+#23 11.56   - Downloading nunomaduro/termwind (v2.4.0)
+#23 11.56   - Downloading voku/portable-ascii (2.0.3)
+#23 11.56   - Downloading phpoption/phpoption (1.9.5)
+#23 11.56   - Downloading graham-campbell/result-type (v1.1.4)
+#23 11.56   - Downloading vlucas/phpdotenv (v5.6.3)
+#23 11.56   - Downloading symfony/css-selector (v7.4.8)
+#23 11.56   - Downloading tijsverkoyen/css-to-inline-styles (v2.4.0)
+#23 11.56   - Downloading symfony/var-dumper (v7.4.8)
+#23 11.56   - Downloading symfony/polyfill-uuid (v1.33.0)
+#23 11.56   - Downloading symfony/uid (v7.4.8)
+#23 11.56   - Downloading symfony/routing (v7.4.8)
+#23 11.56   - Downloading symfony/process (v7.4.8)
+#23 11.56   - Downloading symfony/polyfill-php85 (v1.33.0)
+#23 11.56   - Downloading symfony/polyfill-php84 (v1.33.0)
+#23 11.56   - Downloading symfony/polyfill-php83 (v1.33.0)
+#23 11.56   - Downloading symfony/polyfill-intl-idn (v1.33.0)
+#23 11.56   - Downloading symfony/mime (v7.4.8)
+#23 11.56   - Downloading psr/event-dispatcher (1.0.0)
+#23 11.56   - Downloading symfony/event-dispatcher-contracts (v3.6.0)
+#23 11.56   - Downloading symfony/event-dispatcher (v7.4.8)
+#23 11.56   - Downloading psr/log (3.0.2)
+#23 11.56   - Downloading egulias/email-validator (4.0.4)
+#23 11.56   - Downloading symfony/mailer (v7.4.8)
+#23 11.56   - Downloading symfony/error-handler (v7.4.8)
+#23 11.56   - Downloading symfony/http-kernel (v7.4.8)
+#23 11.56   - Downloading symfony/finder (v7.4.8)
+#23 11.56   - Downloading ramsey/collection (2.1.1)
+#23 11.56   - Downloading brick/math (0.14.8)
+#23 11.56   - Downloading ramsey/uuid (4.9.2)
+#23 11.56   - Downloading psr/simple-cache (3.0.0)
+#23 11.56   - Downloading symfony/translation-contracts (v3.6.1)
+#23 11.56   - Downloading symfony/translation (v7.4.8)
+#23 11.56   - Downloading psr/clock (1.0.0)
+#23 11.56   - Downloading symfony/clock (v7.4.8)
+#23 11.56   - Downloading carbonphp/carbon-doctrine-types (3.2.0)
+#23 11.56   - Downloading nesbot/carbon (3.11.4)
+#23 11.56   - Downloading monolog/monolog (3.10.0)
+#23 11.56   - Downloading league/uri-interfaces (7.8.1)
+#23 11.56   - Downloading league/uri (7.8.1)
+#23 11.56   - Downloading league/mime-type-detection (1.16.0)
+#23 11.56   - Downloading league/flysystem-local (3.31.0)
+#23 11.56   - Downloading league/flysystem (3.33.0)
+#23 11.56   - Downloading nette/utils (v4.1.3)
+#23 11.56   - Downloading nette/schema (v1.3.5)
+#23 11.56   - Downloading dflydev/dot-access-data (v3.0.3)
+#23 11.56   - Downloading league/config (v1.2.0)
+#23 11.56   - Downloading league/commonmark (2.8.2)
+#23 11.56   - Downloading laravel/serializable-closure (v2.0.10)
+#23 11.56   - Downloading laravel/prompts (v0.3.16)
+#23 11.56   - Downloading laravel/framework (v12.56.0)
+#23 11.56   - Downloading laravel/pail (v1.2.6)
+#23 11.57   - Downloading laravel/pint (v1.29.0)
+#23 11.57   - Downloading symfony/yaml (v7.4.8)
+#23 11.57   - Downloading laravel/sail (v1.56.0)
+#23 11.57   - Downloading nikic/php-parser (v5.7.0)
+#23 11.57   - Downloading psy/psysh (v0.12.22)
+#23 11.57   - Downloading laravel/tinker (v2.11.1)
+#23 11.57   - Downloading hamcrest/hamcrest-php (v2.1.1)
+#23 11.57   - Downloading mockery/mockery (1.6.12)
+#23 11.57   - Downloading filp/whoops (2.18.4)
+#23 11.57   - Downloading nunomaduro/collision (v8.9.3)
+#23 11.57   - Downloading staabm/side-effects-detector (1.0.5)
+#23 11.57   - Downloading sebastian/version (5.0.2)
+#23 11.57   - Downloading sebastian/type (5.1.3)
+#23 11.57   - Downloading sebastian/recursion-context (6.0.3)
+#23 11.57   - Downloading sebastian/object-reflector (4.0.1)
+#23 11.57   - Downloading sebastian/object-enumerator (6.0.1)
+#23 11.57   - Downloading sebastian/global-state (7.0.2)
+#23 11.57   - Downloading sebastian/exporter (6.3.2)
+#23 11.57   - Downloading sebastian/environment (7.2.1)
+#23 11.57   - Downloading sebastian/diff (6.0.2)
+#23 11.57   - Downloading sebastian/comparator (6.3.3)
+#23 11.57   - Downloading sebastian/code-unit (3.0.3)
+#23 11.57   - Downloading sebastian/cli-parser (3.0.2)
+#23 11.57   - Downloading phpunit/php-timer (7.0.1)
+#23 11.57   - Downloading phpunit/php-text-template (4.0.1)
+#23 11.57   - Downloading phpunit/php-invoker (5.0.1)
+#23 11.57   - Downloading phpunit/php-file-iterator (5.1.1)
+#23 11.57   - Downloading theseer/tokenizer (1.3.1)
+#23 11.57   - Downloading sebastian/lines-of-code (3.0.1)
+#23 11.57   - Downloading sebastian/complexity (4.0.1)
+#23 11.57   - Downloading sebastian/code-unit-reverse-lookup (4.0.1)
+#23 11.57   - Downloading phpunit/php-code-coverage (11.0.12)
+#23 11.57   - Downloading phar-io/version (3.2.1)
+#23 11.57   - Downloading phar-io/manifest (2.0.4)
+#23 11.57   - Downloading myclabs/deep-copy (1.13.4)
+#23 11.57   - Downloading phpunit/phpunit (11.5.55)
+#23 11.57    0/111 [>---------------------------]   0%
+#23 12.80    2/111 [>---------------------------]   1%
+#23 13.85   10/111 [==>-------------------------]   9%
+#23 14.38   12/111 [===>------------------------]  10%
+#23 15.47   17/111 [====>-----------------------]  15%
+#23 16.55   19/111 [====>-----------------------]  17%
+#23 17.60   22/111 [=====>----------------------]  19%
+#23 17.94   23/111 [=====>----------------------]  20%
+#23 18.97   28/111 [=======>--------------------]  25%
+#23 21.85   32/111 [========>-------------------]  28%
+#23 23.14   34/111 [========>-------------------]  30%
+#23 23.78   45/111 [===========>----------------]  40%
+#23 24.36   56/111 [==============>-------------]  50%
+#23 25.63   64/111 [================>-----------]  57%
+#23 26.63   65/111 [================>-----------]  58%
+#23 27.63   66/111 [================>-----------]  59%
+#23 28.14   67/111 [================>-----------]  60%
+#23 29.22   74/111 [==================>---------]  66%
+#23 33.47   75/111 [==================>---------]  67%
+#23 34.51   77/111 [===================>--------]  69%
+#23 34.76   79/111 [===================>--------]  71%
+#23 36.57   80/111 [====================>-------]  72%
+#23 37.72   88/111 [======================>-----]  79%
+#23 37.82   89/111 [======================>-----]  80%
+#23 38.95   90/111 [======================>-----]  81%
+#23 39.68  100/111 [=========================>--]  90%
+#23 40.89  102/111 [=========================>--]  91%
+#23 41.96  108/111 [===========================>]  97%
+#23 42.98  109/111 [===========================>]  98%
+#23 44.70  110/111 [===========================>]  99%
+#23 55.37  111/111 [============================] 100%
+#23 55.37   - Installing doctrine/inflector (2.1.0): Extracting archive
+#23 55.37   - Installing doctrine/lexer (3.0.1): Extracting archive
+#23 55.37   - Installing dragonmantank/cron-expression (v3.6.0): Extracting archive
+#23 55.37   - Installing symfony/deprecation-contracts (v3.6.0): Extracting archive
+#23 55.37   - Installing psr/container (2.0.2): Extracting archive
+#23 55.37   - Installing fakerphp/faker (v1.24.1): Extracting archive
+#23 55.37   - Installing symfony/polyfill-mbstring (v1.33.0): Extracting archive
+#23 55.37   - Installing symfony/http-foundation (v7.4.8): Extracting archive
+#23 55.38   - Installing fruitcake/php-cors (v1.4.0): Extracting archive
+#23 55.38   - Installing psr/http-message (2.0): Extracting archive
+#23 55.39   - Installing psr/http-client (1.0.3): Extracting archive
+#23 55.39   - Installing ralouphie/getallheaders (3.0.3): Extracting archive
+#23 55.39   - Installing psr/http-factory (1.1.0): Extracting archive
+#23 55.39   - Installing guzzlehttp/psr7 (2.9.0): Extracting archive
+#23 55.39   - Installing guzzlehttp/promises (2.3.0): Extracting archive
+#23 55.39   - Installing guzzlehttp/guzzle (7.10.0): Extracting archive
+#23 55.39   - Installing symfony/polyfill-php80 (v1.33.0): Extracting archive
+#23 55.39   - Installing guzzlehttp/uri-template (v1.0.5): Extracting archive
+#23 55.39   - Installing symfony/polyfill-intl-normalizer (v1.33.0): Extracting archive
+#23 55.39   - Installing symfony/polyfill-intl-grapheme (v1.33.0): Extracting archive
+#23 55.39   - Installing symfony/polyfill-ctype (v1.33.0): Extracting archive
+#23 55.39   - Installing symfony/string (v7.4.8): Extracting archive
+#23 55.39   - Installing symfony/service-contracts (v3.6.1): Extracting archive
+#23 55.39   - Installing symfony/console (v7.4.8): Extracting archive
+#23 55.39   - Installing nunomaduro/termwind (v2.4.0): Extracting archive
+#23 55.39   - Installing voku/portable-ascii (2.0.3): Extracting archive
+#23 55.39   - Installing phpoption/phpoption (1.9.5): Extracting archive
+#23 55.39   - Installing graham-campbell/result-type (v1.1.4): Extracting archive
+#23 55.39   - Installing vlucas/phpdotenv (v5.6.3): Extracting archive
+#23 55.39   - Installing symfony/css-selector (v7.4.8): Extracting archive
+#23 55.39   - Installing tijsverkoyen/css-to-inline-styles (v2.4.0): Extracting archive
+#23 55.39   - Installing symfony/var-dumper (v7.4.8): Extracting archive
+#23 55.39   - Installing symfony/polyfill-uuid (v1.33.0): Extracting archive
+#23 55.39   - Installing symfony/uid (v7.4.8): Extracting archive
+#23 55.39   - Installing symfony/routing (v7.4.8): Extracting archive
+#23 55.39   - Installing symfony/process (v7.4.8): Extracting archive
+#23 55.39   - Installing symfony/polyfill-php85 (v1.33.0): Extracting archive
+#23 55.39   - Installing symfony/polyfill-php84 (v1.33.0): Extracting archive
+#23 55.39   - Installing symfony/polyfill-php83 (v1.33.0): Extracting archive
+#23 55.39   - Installing symfony/polyfill-intl-idn (v1.33.0): Extracting archive
+#23 55.39   - Installing symfony/mime (v7.4.8): Extracting archive
+#23 55.39   - Installing psr/event-dispatcher (1.0.0): Extracting archive
+#23 55.39   - Installing symfony/event-dispatcher-contracts (v3.6.0): Extracting archive
+#23 55.39   - Installing symfony/event-dispatcher (v7.4.8): Extracting archive
+#23 55.39   - Installing psr/log (3.0.2): Extracting archive
+#23 55.40   - Installing egulias/email-validator (4.0.4): Extracting archive
+#23 55.40   - Installing symfony/mailer (v7.4.8): Extracting archive
+#23 55.40   - Installing symfony/error-handler (v7.4.8): Extracting archive
+#23 55.40   - Installing symfony/http-kernel (v7.4.8): Extracting archive
+#23 55.40   - Installing symfony/finder (v7.4.8): Extracting archive
+#23 55.40   - Installing ramsey/collection (2.1.1): Extracting archive
+#23 55.40   - Installing brick/math (0.14.8): Extracting archive
+#23 55.40   - Installing ramsey/uuid (4.9.2): Extracting archive
+#23 55.40   - Installing psr/simple-cache (3.0.0): Extracting archive
+#23 55.40   - Installing symfony/translation-contracts (v3.6.1): Extracting archive
+#23 55.40   - Installing symfony/translation (v7.4.8): Extracting archive
+#23 55.40   - Installing psr/clock (1.0.0): Extracting archive
+#23 55.40   - Installing symfony/clock (v7.4.8): Extracting archive
+#23 55.40   - Installing carbonphp/carbon-doctrine-types (3.2.0): Extracting archive
+#23 55.40   - Installing nesbot/carbon (3.11.4): Extracting archive
+#23 55.40   - Installing monolog/monolog (3.10.0): Extracting archive
+#23 55.40   - Installing league/uri-interfaces (7.8.1): Extracting archive
+#23 55.40   - Installing league/uri (7.8.1): Extracting archive
+#23 55.40   - Installing league/mime-type-detection (1.16.0): Extracting archive
+#23 55.40   - Installing league/flysystem-local (3.31.0): Extracting archive
+#23 55.40   - Installing league/flysystem (3.33.0): Extracting archive
+#23 55.40   - Installing nette/utils (v4.1.3): Extracting archive
+#23 55.40   - Installing nette/schema (v1.3.5): Extracting archive
+#23 55.40   - Installing dflydev/dot-access-data (v3.0.3): Extracting archive
+#23 55.40   - Installing league/config (v1.2.0): Extracting archive
+#23 55.40   - Installing league/commonmark (2.8.2): Extracting archive
+#23 55.40   - Installing laravel/serializable-closure (v2.0.10): Extracting archive
+#23 55.40   - Installing laravel/prompts (v0.3.16): Extracting archive
+#23 55.40   - Installing laravel/framework (v12.56.0): Extracting archive
+#23 55.41   - Installing laravel/pail (v1.2.6): Extracting archive
+#23 55.41   - Installing laravel/pint (v1.29.0): Extracting archive
+#23 55.41   - Installing symfony/yaml (v7.4.8): Extracting archive
+#23 55.41   - Installing laravel/sail (v1.56.0): Extracting archive
+#23 55.41   - Installing nikic/php-parser (v5.7.0): Extracting archive
+#23 55.41   - Installing psy/psysh (v0.12.22): Extracting archive
+#23 55.41   - Installing laravel/tinker (v2.11.1): Extracting archive
+#23 55.41   - Installing hamcrest/hamcrest-php (v2.1.1): Extracting archive
+#23 55.41   - Installing mockery/mockery (1.6.12): Extracting archive
+#23 55.41   - Installing filp/whoops (2.18.4): Extracting archive
+#23 55.41   - Installing nunomaduro/collision (v8.9.3): Extracting archive
+#23 55.41   - Installing staabm/side-effects-detector (1.0.5): Extracting archive
+#23 55.41   - Installing sebastian/version (5.0.2): Extracting archive
+#23 55.41   - Installing sebastian/type (5.1.3): Extracting archive
+#23 55.41   - Installing sebastian/recursion-context (6.0.3): Extracting archive
+#23 55.41   - Installing sebastian/object-reflector (4.0.1): Extracting archive
+#23 55.41   - Installing sebastian/object-enumerator (6.0.1): Extracting archive
+#23 55.41   - Installing sebastian/global-state (7.0.2): Extracting archive
+#23 55.41   - Installing sebastian/exporter (6.3.2): Extracting archive
+#23 55.41   - Installing sebastian/environment (7.2.1): Extracting archive
+#23 55.41   - Installing sebastian/diff (6.0.2): Extracting archive
+#23 55.41   - Installing sebastian/comparator (6.3.3): Extracting archive
+#23 55.41   - Installing sebastian/code-unit (3.0.3): Extracting archive
+#23 55.41   - Installing sebastian/cli-parser (3.0.2): Extracting archive
+#23 55.41   - Installing phpunit/php-timer (7.0.1): Extracting archive
+#23 55.41   - Installing phpunit/php-text-template (4.0.1): Extracting archive
+#23 55.41   - Installing phpunit/php-invoker (5.0.1): Extracting archive
+#23 55.41   - Installing phpunit/php-file-iterator (5.1.1): Extracting archive
+#23 55.41   - Installing theseer/tokenizer (1.3.1): Extracting archive
+#23 55.41   - Installing sebastian/lines-of-code (3.0.1): Extracting archive
+#23 55.41   - Installing sebastian/complexity (4.0.1): Extracting archive
+#23 55.41   - Installing sebastian/code-unit-reverse-lookup (4.0.1): Extracting archive
+#23 55.41   - Installing phpunit/php-code-coverage (11.0.12): Extracting archive
+#23 55.41   - Installing phar-io/version (3.2.1): Extracting archive
+#23 55.41   - Installing phar-io/manifest (2.0.4): Extracting archive
+#23 55.41   - Installing myclabs/deep-copy (1.13.4): Extracting archive
+#23 55.41   - Installing phpunit/phpunit (11.5.55): Extracting archive
+#23 55.41    0/111 [>---------------------------]   0%
+#23 55.52   53/111 [=============>--------------]  47%
+#23 55.64   86/111 [=====================>------]  77%
+#23 55.74  107/111 [==========================>-]  96%
+#23 55.79  111/111 [============================] 100%
+#23 56.76 70 package suggestions were added by new dependencies, use `composer suggest` to see details.
+#23 56.76 Generating optimized autoload files
+#23 57.74 > Illuminate\Foundation\ComposerScripts::postAutoloadDump
+#23 57.76 > @php artisan package:discover --ansi
+#23 57.85 
+#23 57.85   [37;44m INFO [39;49m Discovering packages.  
+#23 57.85 
+#23 57.85   laravel/pail [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#23 57.85   laravel/sail [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#23 57.85   laravel/tinker [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#23 57.85   nesbot/carbon [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#23 57.86   nunomaduro/collision [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#23 57.86   nunomaduro/termwind [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#23 57.86 
+#23 57.86 81 packages you are using are looking for funding.
+#23 57.86 Use the `composer fund` command to find out more!
+#23 57.86 > @php artisan vendor:publish --tag=laravel-assets --ansi --force
+#23 57.96 
+#23 57.96   [37;44m INFO [39;49m No publishable resources for tag [1m[laravel-assets][22m.  
+#23 57.96 
+#23 58.02 No security vulnerability advisories found.
+#23 58.02 > @php artisan key:generate --ansi
+#23 58.12 
+#23 58.12   [37;44m INFO [39;49m Application key set successfully.  
+#23 58.12 
+#23 58.12 > @php -r "file_exists('database/database.sqlite') || touch('database/database.sqlite');"
+#23 58.14 > @php artisan migrate --graceful --ansi
+#23 58.23 
+#23 58.23   [37;44m INFO [39;49m Preparing database.  
+#23 58.23 
+#23 58.23   Creating migration table [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m 38.67ms[39m [32;1mDONE[39;22m
+#23 58.27 
+#23 58.28   [37;44m INFO [39;49m Running migrations.  
+#23 58.28 
+#23 58.28   0001_01_01_000000_create_users_table [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m 81.41ms[39m [32;1mDONE[39;22m
+#23 58.38   0001_01_01_000001_create_cache_table [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m 55.41ms[39m [32;1mDONE[39;22m
+#23 58.44   0001_01_01_000002_create_jobs_table [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m 80.98ms[39m [32;1mDONE[39;22m
+#23 58.54 
+#23 DONE 58.6s
+
+#24 [with-package stage-0 7/9] WORKDIR /var/www/demo
+#24 DONE 0.1s
+
+#25 [with-package stage-0 8/9] RUN composer config repositories.hybrid-cache path /opt/hybrid-cache     && composer require rajmundtoth0/hybrid-cache:@dev predis/predis:^2.2 --no-interaction     && php /opt/hybrid-cache/docker/with-package/configure-cache-stores.php     && printf '\nAPP_ENV=local\nAPP_DEBUG=true\nSESSION_DRIVER=array\nQUEUE_CONNECTION=sync\nCACHE_STORE=redis\nREDIS_CLIENT=predis\nREDIS_HOST=redis\nHYBRID_CACHE_LOCAL_STORE=apc\nHYBRID_CACHE_DISTRIBUTED_STORE=redis\nHYBRID_CACHE_STALE_TTL=60\n' >> .env     && php artisan key:generate --force --ansi     && php artisan config:clear --ansi
+#25 0.396 ./composer.json has been updated
+#25 0.413 Running composer update rajmundtoth0/hybrid-cache predis/predis
+#25 0.418 Loading composer repositories with package information
+#25 3.227 Updating dependencies
+#25 3.237 Lock file operations: 2 installs, 0 updates, 0 removals
+#25 3.237   - Locking predis/predis (v2.4.1)
+#25 3.237   - Locking rajmundtoth0/hybrid-cache (dev-main ce9f845)
+#25 3.254 Writing lock file
+#25 3.254 Installing dependencies from lock file (including require-dev)
+#25 3.388 Package operations: 2 installs, 0 updates, 0 removals
+#25 3.406   - Downloading predis/predis (v2.4.1)
+#25 3.418  0/1 [>---------------------------]   0%
+#25 6.248  1/1 [============================] 100%
+#25 6.248   - Installing predis/predis (v2.4.1): Extracting archive
+#25 6.252   - Installing rajmundtoth0/hybrid-cache (dev-main ce9f845): Symlinking from /opt/hybrid-cache
+#25 6.272  0/1 [>---------------------------]   0%
+#25 6.283  1/1 [============================] 100%
+#25 6.543 1 package suggestions were added by new dependencies, use `composer suggest` to see details.
+#25 6.545 Generating optimized autoload files
+#25 7.564 > Illuminate\Foundation\ComposerScripts::postAutoloadDump
+#25 7.603 > @php artisan package:discover --ansi
+#25 7.726 
+#25 7.726   [37;44m INFO [39;49m Discovering packages.  
+#25 7.726 
+#25 7.729   laravel/pail [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#25 7.729   laravel/sail [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#25 7.729   laravel/tinker [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#25 7.730   nesbot/carbon [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#25 7.730   nunomaduro/collision [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#25 7.730   nunomaduro/termwind [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#25 7.731   rajmundtoth0/hybrid-cache [90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m[90m.[39m [32;1mDONE[39;22m
+#25 7.731 
+#25 7.737 82 packages you are using are looking for funding.
+#25 7.737 Use the `composer fund` command to find out more!
+#25 7.737 > @php artisan vendor:publish --tag=laravel-assets --ansi --force
+#25 7.860 
+#25 7.860   [37;44m INFO [39;49m No publishable resources for tag [1m[laravel-assets][22m.  
+#25 7.860 
+#25 11.15 No security vulnerability advisories found.
+#25 11.31 
+#25 11.31   [37;44m INFO [39;49m Application key set successfully.  
+#25 11.31 
+#25 11.39 
+#25 11.39   [37;44m INFO [39;49m Configuration cache cleared successfully.  
+#25 11.39 
+#25 DONE 11.4s
+
+#26 [with-package stage-0 9/9] COPY docker/with-package/routes.web.php /var/www/demo/routes/web.php
+#26 DONE 0.1s
+
+#27 [with-package] exporting to image
+#27 exporting layers
+#27 exporting layers 0.9s done
+#27 writing image sha256:675b773c8ab3f6d20e3a2ebecdd8cbb4fbc65ceac4b8d0db35d194e698a001d9 done
+#27 naming to docker.io/library/hybrid-cache-with-package 0.0s done
+#27 DONE 0.9s
+
+#28 [with-package] resolving provenance for metadata file
+#28 DONE 0.0s
+ hybrid-cache-without-package  Built
+ hybrid-cache-with-package  Built
+ Container hybrid-cache-redis-1  Running
+ Container hybrid-cache-without-package-1  Running
+ Container hybrid-cache-with-package-1  Recreate
+ Container hybrid-cache-with-package-1  Recreated
+ Container hybrid-cache-with-package-1  Starting
+ Container hybrid-cache-with-package-1  Started
+Benchmark configuration: work_ms=40 cold_runs=12 warm_runs=40
+with-package cold            count=12  avg=   44.66ms median=   42.57ms p95=   43.56ms min=   42.02ms max=   66.60ms
+without-package cold         count=12  avg=   42.13ms median=   41.96ms p95=   42.97ms min=   41.44ms max=   43.21ms
+with-package warm            count=40  avg=    0.16ms median=    0.14ms p95=    0.24ms min=    0.12ms max=    0.31ms
+without-package warm         count=40  avg=    1.12ms median=    1.10ms p95=    1.52ms min=    0.83ms max=    1.64ms
+stale probe first:      duration=44.77ms computed=true token=b8b4e3c1-e6c0-4344-a3f9-ec705a9b9308
+stale probe stale-hit:  duration=1.53ms computed=false token=b8b4e3c1-e6c0-4344-a3f9-ec705a9b9308
+stale probe refreshed:  duration=1.2ms computed=false token=8eceb72d-35af-4276-aecf-f711dade4253

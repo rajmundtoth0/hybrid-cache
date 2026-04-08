@@ -1,0 +1,65 @@
+{
+    "name": "rajmundtoth0/hybrid-cache",
+    "description": "A Laravel-native hybrid cache package with local and distributed layers plus stale-while-revalidate semantics.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "cache",
+        "hybrid-cache",
+        "laravel",
+        "stale-while-revalidate",
+        "swr"
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/cache": "^12.0",
+        "illuminate/support": "^12.0"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.64",
+        "larastan/larastan": "^3.0",
+        "orchestra/testbench": "^10.0",
+        "pestphp/pest": "^3.0",
+        "pestphp/pest-plugin-laravel": "^3.0",
+        "rajmundtoth0/phpstan-forbidden": "^1.1",
+        "phpstan/phpstan": "^2.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "rajmundtoth0\\HybridCache\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "rajmundtoth0\\HybridCache\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "rajmundtoth0\\HybridCache\\HybridCacheServiceProvider"
+            ],
+            "aliases": {
+                "HybridCache": "rajmundtoth0\\HybridCache\\Facades\\HybridCache"
+            }
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "phpstan/extension-installer": true
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/pest",
+        "analyse": "vendor/bin/phpstan analyse --memory-limit=1G",
+        "format": "vendor/bin/php-cs-fixer fix --allow-risky=yes",
+        "format-ci": "vendor/bin/php-cs-fixer fix --allow-risky=yes --dry-run --diff --ansi",
+        "quality": [
+            "@format-ci",
+            "@analyse",
+            "@test"
+        ]
+    },
+    "prefer-stable": true
+}

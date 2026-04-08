@@ -1,0 +1,33 @@
+includes:
+  - vendor/larastan/larastan/extension.neon
+  - vendor/rajmundtoth0/phpstan-forbidden/extension.neon
+
+parameters:
+  level: max
+  paths:
+    - src
+  tmpDir: build/phpstan
+  treatPhpDocTypesAsCertain: true
+  forbidden_node:
+    include_paths:
+      - /src/
+      - /tests/
+    exclude_paths:
+      - /vendor/
+      - /build/
+    use_from_tests: true
+    forbid_dynamic_function_calls: false
+    non_ignorable: true
+    nodes:
+      - type: Stmt_Echo
+      - type: Expr_Print
+      - type: Expr_Eval
+      - type: Expr_Exit
+      - type: Expr_FuncCall
+        functions:
+          - dd
+          - dump
+          - ray
+          - var_dump
+          - print_r
+          - var_export

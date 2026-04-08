@@ -1,0 +1,15 @@
+/build export-ignore
+/docker export-ignore
+/scripts export-ignore
+/tests export-ignore
+/.dockerignore export-ignore
+/.editorconfig export-ignore
+/.gitignore export-ignore
+/.php-cs-fixer.cache export-ignore
+/.php-cs-fixer.dist.php export-ignore
+/Makefile export-ignore
+/benchmark-run.log export-ignore
+/composer.lock export-ignore
+/docker-compose.benchmark.yml export-ignore
+/phpstan.neon.dist export-ignore
+/phpunit.xml.dist export-ignore

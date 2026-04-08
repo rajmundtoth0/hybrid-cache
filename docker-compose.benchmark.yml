@@ -1,0 +1,22 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  with-package:
+    build:
+      context: .
+      dockerfile: docker/with-package/Dockerfile
+    depends_on:
+      - redis
+    ports:
+      - "8081:8000"
+
+  without-package:
+    build:
+      context: .
+      dockerfile: docker/without-package/Dockerfile
+    depends_on:
+      - redis
+    ports:
+      - "8082:8000"
