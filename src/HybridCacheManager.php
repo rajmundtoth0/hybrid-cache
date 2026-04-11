@@ -12,8 +12,8 @@ use Illuminate\Cache\CacheManager;
 use Illuminate\Cache\Repository;
 use Illuminate\Contracts\Cache\Lock;
 use Illuminate\Contracts\Cache\LockProvider;
-use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
+use rajmundtoth0\HybridCache\Config\HybridCacheConfig;
 
 final class HybridCacheManager
 {
@@ -21,15 +21,13 @@ final class HybridCacheManager
     private const FOREVER_TTL = 315360000;
     private const DISTRIBUTED_RETRY_ATTEMPTS = 5;
     private const DISTRIBUTED_RETRY_DELAY_US = 50_000;
+    private const SLOT_A = 'a';
+    private const SLOT_B = 'b';
 
-    /**
-     * @param array<string, mixed> $storeConfig
-     */
     public function __construct(
         private readonly Application $app,
         private readonly CacheManager $cache,
-        private readonly ConfigRepository $config,
-        private readonly array $storeConfig = [],
+        private readonly HybridCacheConfig $config,
     ) {
     }
 
@@ -37,10 +35,12 @@ final class HybridCacheManager
     {
         $payloadKey = $this->payloadKey($key);
         $localStore = $this->localStore();
-        $envelope = $this->getEnvelope($localStore, $payloadKey);
+        $localHit = $this->fetchEnvelope($localStore, $payloadKey, ! $this->usesSingleStore());
+        $envelope = $localHit['envelope'];
 
         if ($envelope === null && ! $this->usesSingleStore()) {
-            $envelope = $this->getEnvelope($this->distributedStore(), $payloadKey);
+            $distributedHit = $this->fetchEnvelope($this->distributedStore(), $payloadKey, false);
+            $envelope = $distributedHit['envelope'];
         }
 
         if ($envelope === null || $envelope->secondsUntilExpiry(time()) < 1) {
@@ -107,17 +107,20 @@ final class HybridCacheManager
         $now = time();
 
         $localStore = $this->localStore();
-        $localEnvelope = $this->getEnvelope($localStore, $payloadKey);
+        $localHit = $this->fetchEnvelope($localStore, $payloadKey, ! $this->usesSingleStore());
+        $localEnvelope = $localHit['envelope'];
+        $localActiveSlot = $localHit['activeSlot'];
 
         if ($localEnvelope?->isFresh($now)) {
             return $localEnvelope->value;
         }
 
         if (! $this->usesSingleStore()) {
-            $distributedEnvelope = $this->getEnvelope($this->distributedStore(), $payloadKey);
+            $distributedHit = $this->fetchEnvelope($this->distributedStore(), $payloadKey, false);
+            $distributedEnvelope = $distributedHit['envelope'];
 
             if ($distributedEnvelope !== null) {
-                $this->hydrateLocal($payloadKey, $distributedEnvelope, $now);
+                $this->hydrateLocal($payloadKey, $distributedEnvelope, $now, $localActiveSlot);
 
                 if ($distributedEnvelope->isFresh($now)) {
                     return $distributedEnvelope->value;
@@ -187,6 +190,89 @@ final class HybridCacheManager
         return $this->lock($name, owner: $owner);
     }
 
+    public function coordinatedRefresh(
+        string $key,
+        Closure $builder,
+        int|DateInterval|DateTimeInterface $ttl,
+        int|DateInterval|DateTimeInterface|null $staleTtl = null,
+    ): RefreshResult {
+        $payloadKey = $this->payloadKey($key);
+        $lockKey = $this->lockKey($key);
+        $release = $this->acquireRefreshLock($lockKey);
+
+        if ($release === null) {
+            return RefreshResult::alreadyRefreshing($key);
+        }
+
+        try {
+            $freshTtl = $this->normalizeFreshTtl($ttl);
+            $staleWindow = $this->normalizeWindow($staleTtl ?? $this->defaultStaleTtl());
+            $now = time();
+
+            $distributed = $this->distributedStore();
+            $local = $this->usesSingleStore() ? null : $this->localStore();
+
+            $envelope = CacheEnvelope::fresh($builder(), $freshTtl, $staleWindow, $now);
+            $ttlSeconds = max(1, $envelope->secondsUntilExpiry($now));
+
+            if (! $distributed->put($payloadKey, $envelope->toArray(), $ttlSeconds)) {
+                return RefreshResult::failed($key, 'Distributed cache write failed.');
+            }
+
+            $inactiveSlot = null;
+
+            if ($local !== null) {
+                $activeSlot = $this->readActiveSlot($local, $payloadKey) ?? self::SLOT_A;
+                $inactiveSlot = $this->inactiveSlot($activeSlot);
+                $inactiveKey = $this->slotKey($payloadKey, $inactiveSlot);
+
+                $local->put($inactiveKey, $envelope->toArray(), $ttlSeconds);
+                $this->setActiveSlot($local, $payloadKey, $inactiveSlot, $ttlSeconds);
+            }
+
+            return RefreshResult::refreshed($key, $inactiveSlot);
+        } catch (\Throwable $e) {
+            return RefreshResult::failed($key, $e->getMessage());
+        } finally {
+            $release();
+        }
+    }
+
+    public function groupVersion(string $group): int
+    {
+        $value = $this->distributedStore()->get($this->groupVersionKey($group));
+
+        if (is_int($value)) {
+            return $value;
+        }
+
+        if (is_numeric($value)) {
+            return (int) $value;
+        }
+
+        return 1;
+    }
+
+    public function bumpGroupVersion(string $group): int
+    {
+        $key = $this->groupVersionKey($group);
+        $store = $this->distributedStore();
+
+        try {
+            $next = $store->increment($key);
+            if (is_int($next)) {
+                return $next;
+            }
+        } catch (\Throwable) {
+            // fall through to manual bump
+        }
+
+        $next = $this->groupVersion($group) + 1;
+        $store->put($key, $next, self::FOREVER_TTL);
+
+        return $next;
+    }
+
     private function refreshStale(
         string $payloadKey,
         string $lockKey,
@@ -239,13 +325,13 @@ final class HybridCacheManager
 
         $fromDistributed = $this->awaitDistributedPayload($payloadKey);
 
-        if ($fromDistributed === null) {
+        if ($fromDistributed['envelope'] === null) {
             return $this->storeFreshPayload($payloadKey, $callback, $freshTtl, $staleWindow);
         }
 
-        $this->hydrateLocal($payloadKey, $fromDistributed, time());
+        $this->hydrateLocal($payloadKey, $fromDistributed['envelope'], time(), $fromDistributed['activeSlot']);
 
-        return $fromDistributed;
+        return $fromDistributed['envelope'];
     }
 
     private function storeFreshPayload(string $payloadKey, Closure $callback, int $freshTtl, int $staleWindow): CacheEnvelope
@@ -262,14 +348,25 @@ final class HybridCacheManager
     {
         $ttl = max(1, $envelope->secondsUntilExpiry($now));
 
-        $this->distributedStore()->put($payloadKey, $envelope->toArray(), $ttl);
+        $distributed = $this->distributedStore();
+        $distributed->put($payloadKey, $envelope->toArray(), $ttl);
 
         if (! $this->usesSingleStore()) {
-            $this->localStore()->put($payloadKey, $envelope->toArray(), $ttl);
+            $local = $this->localStore();
+            $activeSlot = $this->readActiveSlot($local, $payloadKey);
+            $targetKey = $activeSlot === null ? $payloadKey : $this->slotKey($payloadKey, $activeSlot);
+
+            if ($activeSlot !== null) {
+                $this->setActiveSlot($local, $payloadKey, $activeSlot, $ttl);
+            } else {
+                $this->clearActiveSlot($local, $payloadKey);
+            }
+
+            $local->put($targetKey, $envelope->toArray(), $ttl);
         }
     }
 
-    private function hydrateLocal(string $payloadKey, CacheEnvelope $envelope, int $now): void
+    private function hydrateLocal(string $payloadKey, CacheEnvelope $envelope, int $now, ?string $activeSlot): void
     {
         if ($this->usesSingleStore()) {
             return;
@@ -281,28 +378,59 @@ final class HybridCacheManager
             return;
         }
 
-        $this->localStore()->put($payloadKey, $envelope->toArray(), $ttl);
+        $local = $this->localStore();
+        $targetKey = $payloadKey;
+
+        if ($activeSlot !== null) {
+            $this->setActiveSlot($local, $payloadKey, $activeSlot, $ttl);
+            $targetKey = $this->slotKey($payloadKey, $activeSlot);
+        } else {
+            $this->clearActiveSlot($local, $payloadKey);
+        }
+
+        $local->put($targetKey, $envelope->toArray(), $ttl);
     }
 
-    private function awaitDistributedPayload(string $payloadKey): ?CacheEnvelope
+    /**
+     * @return array{envelope: ?CacheEnvelope, activeSlot: ?string}
+     */
+    private function awaitDistributedPayload(string $payloadKey): array
     {
         for ($attempt = 0; $attempt < self::DISTRIBUTED_RETRY_ATTEMPTS; $attempt++) {
             usleep(self::DISTRIBUTED_RETRY_DELAY_US);
 
-            $envelope = $this->getEnvelope($this->distributedStore(), $payloadKey);
+            $hit = $this->fetchEnvelope($this->distributedStore(), $payloadKey, false);
 
-            if ($envelope !== null) {
-                return $envelope;
+            if ($hit['envelope'] !== null) {
+                return $hit;
             }
         }
 
-        return null;
+        return [
+            'envelope' => null,
+            'activeSlot' => null,
+        ];
     }
 
     /**
      * @param Closure(): CacheEnvelope $onAcquired
      */
     private function withRefreshLock(string $lockKey, Closure $onAcquired): ?CacheEnvelope
+    {
+        $release = $this->acquireRefreshLock($lockKey);
+
+        if ($release === null) {
+            return null;
+        }
+
+        try {
+            return $onAcquired();
+        } finally {
+            $release();
+        }
+    }
+
+    private function acquireRefreshLock(string $lockKey): ?Closure
     {
         $store = $this->distributedStore();
         $backend = $store->getStore();
@@ -315,34 +443,19 @@ final class HybridCacheManager
                 return null;
             }
 
-            try {
-                return $onAcquired();
-            } finally {
-                $lock->release();
-            }
+            return fn (): bool => $lock->release();
         }
 
         if (! $store->add($lockKey, true, $lockTtl)) {
             return null;
         }
 
-        try {
-            return $onAcquired();
-        } finally {
-            $store->forget($lockKey);
-        }
-    }
-
-    private function getEnvelope(Repository $store, string $payloadKey): ?CacheEnvelope
-    {
-        return CacheEnvelope::fromStored($store->get($payloadKey));
+        return fn (): bool => $store->forget($lockKey);
     }
 
     public function prefix(): string
     {
-        $prefix = $this->stringConfig('key_prefix', $this->stringConfig('hybrid-cache.key_prefix', 'hybrid-cache:'));
-
-        return rtrim($prefix, ':').':';
+        return $this->config->keyPrefix;
     }
 
     private function payloadKey(string $key): string
@@ -350,19 +463,82 @@ final class HybridCacheManager
         return $this->prefix().$key;
     }
 
+    private function activePointerKey(string $payloadKey): string
+    {
+        return $payloadKey.':active';
+    }
+
+    private function slotKey(string $payloadKey, string $slot): string
+    {
+        return $payloadKey.':slot:'.$slot;
+    }
+
+    /**
+     * @return array{envelope: ?CacheEnvelope, activeSlot: ?string}
+     */
+    private function fetchEnvelope(Repository $store, string $payloadKey, bool $useActivePointer = true): array
+    {
+        $activeSlot = $useActivePointer ? $this->readActiveSlot($store, $payloadKey) : null;
+        $targetKey = $activeSlot === null ? $payloadKey : $this->slotKey($payloadKey, $activeSlot);
+
+        return [
+            'envelope' => CacheEnvelope::fromStored($store->get($targetKey)),
+            'activeSlot' => $activeSlot,
+        ];
+    }
+
+    private function readActiveSlot(Repository $store, string $payloadKey): ?string
+    {
+        $value = $store->get($this->activePointerKey($payloadKey));
+
+        if ($value === self::SLOT_A || $value === self::SLOT_B) {
+            return $value;
+        }
+
+        if ($value !== null) {
+            $store->forget($this->activePointerKey($payloadKey));
+        }
+
+        return null;
+    }
+
+    private function setActiveSlot(Repository $store, string $payloadKey, string $slot, int $ttl): bool
+    {
+        if ($slot !== self::SLOT_A && $slot !== self::SLOT_B) {
+            throw new \InvalidArgumentException('Invalid active slot.');
+        }
+
+        return $store->put($this->activePointerKey($payloadKey), $slot, $ttl);
+    }
+
+    private function clearActiveSlot(Repository $store, string $payloadKey): void
+    {
+        $store->forget($this->activePointerKey($payloadKey));
+    }
+
+    private function inactiveSlot(string $activeSlot): string
+    {
+        return $activeSlot === self::SLOT_A ? self::SLOT_B : self::SLOT_A;
+    }
+
     private function lockKey(string $key): string
     {
         return $this->prefix().'lock:'.$key;
     }
 
+    private function groupVersionKey(string $group): string
+    {
+        return $this->prefix().'group:'.$group.':version';
+    }
+
     private function defaultStaleTtl(): int
     {
-        return max(0, $this->intConfig('stale_ttl', $this->intConfig('hybrid-cache.stale_ttl', 300)));
+        return $this->config->staleTtl;
     }
 
     private function lockTtl(): int
     {
-        return max(1, $this->intConfig('lock_ttl', $this->intConfig('hybrid-cache.lock_ttl', 30)));
+        return $this->config->lockTtl;
     }
 
     private function usesSingleStore(): bool
@@ -390,50 +566,12 @@ final class HybridCacheManager
 
     private function localStoreName(): string
     {
-        return $this->stringConfig('local_store', $this->stringConfig('hybrid-cache.local_store', 'file'));
+        return $this->config->localStore;
     }
 
     private function distributedStoreName(): string
     {
-        return $this->stringConfig('distributed_store', $this->stringConfig('hybrid-cache.distributed_store', 'file'));
-    }
-
-    private function stringConfig(string $key, string $default): string
-    {
-        $override = $this->storeConfig[$key] ?? null;
-
-        if (is_string($override) && $override !== '') {
-            return $override;
-        }
-
-        $value = $this->config->get($key, $default);
-
-        return is_string($value) ? $value : $default;
-    }
-
-    private function intConfig(string $key, int $default): int
-    {
-        $override = $this->storeConfig[$key] ?? null;
-
-        if (is_int($override)) {
-            return $override;
-        }
-
-        if (is_numeric($override)) {
-            return (int) $override;
-        }
-
-        $value = $this->config->get($key, $default);
-
-        if (is_int($value)) {
-            return $value;
-        }
-
-        if (is_numeric($value)) {
-            return (int) $value;
-        }
-
-        return $default;
+        return $this->config->distributedStore;
     }
 
     private function normalizeFreshTtl(int|DateInterval|DateTimeInterface $ttl): int

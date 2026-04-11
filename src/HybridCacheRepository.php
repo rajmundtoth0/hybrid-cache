@@ -71,7 +71,30 @@ final class HybridCacheRepository extends Repository
             throw new \InvalidArgumentException('Hybrid cache store expects flexible TTLs in the Laravel format: [fresh, stale].');
         }
 
-        return [$ttl[0], $ttl[1]];
+        $fresh = $this->requireSupportedTtl($ttl[0]);
+        $stale = $this->requireSupportedTtl($ttl[1]);
+
+        return [$fresh, $stale];
+    }
+
+    /**
+     * @return int|DateInterval|DateTimeInterface
+     */
+    private function requireSupportedTtl(mixed $ttl): int|DateInterval|DateTimeInterface
+    {
+        if (is_int($ttl)) {
+            return $ttl;
+        }
+
+        if ($ttl instanceof DateInterval) {
+            return $ttl;
+        }
+
+        if ($ttl instanceof DateTimeInterface) {
+            return $ttl;
+        }
+
+        throw new \InvalidArgumentException('Hybrid cache store expects flexible TTLs in the Laravel format: [fresh, stale].');
     }
 
     private function normalizeTtlToSeconds(int|DateInterval|DateTimeInterface $ttl): int

@@ -112,6 +112,10 @@ final class HybridCacheStore implements LockProvider, Store
 
     private function normalizeDelta(mixed $value): int
     {
-        return is_numeric($value) ? (int) $value : 1;
+        if (! is_numeric($value)) {
+            throw new \InvalidArgumentException('Delta must be numeric.');
+        }
+
+        return (int) $value;
     }
 }

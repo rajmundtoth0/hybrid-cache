@@ -17,7 +17,7 @@ Laravel gives you strong cache primitives, but most applications still have to a
 - stale reads during refresh windows
 - refresh coordination to avoid stampedes
 
-This package packages that behavior into a single Laravel-native abstraction with minimal configuration and a deliberately small public API.
+This package combines that behavior into a single Laravel-native abstraction with minimal configuration and a deliberately small public API.
 
 ## Installation
 
@@ -42,6 +42,17 @@ return [
     'stale_ttl' => (int) env('HYBRID_CACHE_STALE_TTL', 300),
     'lock_ttl' => (int) env('HYBRID_CACHE_LOCK_TTL', 30),
     'key_prefix' => env('HYBRID_CACHE_PREFIX', 'hybrid-cache:'),
+    'refresh' => [
+        'default_ttl' => (int) env('HYBRID_CACHE_REFRESH_TTL', 60),
+        'http' => [
+            'enabled' => false,
+            'path' => '/hybrid-cache/refresh',
+            'middleware' => ['signed', 'throttle:60,1'],
+        ],
+        'keys' => [],
+        'prefixes' => [],
+        'groups' => [],
+    ],
 ];
 ```
 
@@ -150,6 +161,7 @@ Behavior summary:
 
 - fresh values are returned immediately from the local layer when available
 - local misses fall back to the distributed layer and rehydrate the local layer
+- the active pointer for coordinated refresh lives only in the local cache (APCu)
 - stale values are returned during the stale window while a refresh is coordinated behind a lock
 - hard-expired values trigger a refresh before a new value is stored
 
@@ -157,6 +169,75 @@ Behavior summary:
 
 ```php
 HybridCache::forget('dashboard:stats');
+```
+
+## Coordinated refresh (HTTP / CLI)
+
+This package can optionally expose a **signed POST endpoint** and an **Artisan command** to trigger coordinated refreshes on a node. These are disabled by default and are intended for trusted/internal use cases (deploy hooks, admin-triggered updates, orchestration, etc.).
+
+Key properties:
+
+- disabled by default
+- POST only
+- signed URLs required
+- rate limited
+- safe promotion flow (lock → write distributed payload → update local slot → flip local pointer)
+
+Local pointers live in the local cache only. If you need to reset them, use the HTTP/CLI refresh or clear the local cache; the distributed store is never queried for the active pointer.
+
+Enable the endpoint and define refreshers in `config/hybrid-cache.php`:
+
+```php
+'refresh' => [
+    'http' => [
+        'enabled' => true,
+    ],
+    'keys' => [
+        'dashboard:stats' => [
+            'handler' => [\App\Cache\DashboardStats::class, 'build'],
+            'ttl' => 300,
+            'stale_ttl' => 60,
+            'group' => 'dashboard',
+        ],
+    ],
+    'groups' => [
+        'dashboard' => [
+            'keys' => ['dashboard:stats'],
+        ],
+    ],
+],
+```
+
+Trigger via HTTP:
+
+```php
+use Illuminate\Support\Facades\URL;
+
+$url = URL::signedRoute('hybrid-cache.refresh');
+
+// POST JSON: { "key": "dashboard:stats" }
+```
+
+Trigger via CLI:
+
+```bash
+php artisan hybrid-cache:refresh dashboard:stats
+php artisan hybrid-cache:refresh --group=dashboard --all
+```
+
+### Group versions (optional)
+
+You can use group versions to implement **lazy group refresh** without wildcard deletion:
+
+```php
+$version = HybridCache::groupVersion('dashboard');
+$key = "dashboard:stats:v{$version}";
+```
+
+Then trigger a group refresh to bump the version (and optionally refresh a subset of hot keys):
+
+```bash
+php artisan hybrid-cache:refresh --group=dashboard
 ```
 
 ## API design
