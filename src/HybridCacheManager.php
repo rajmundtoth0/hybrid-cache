@@ -35,8 +35,7 @@ final class HybridCacheManager
     {
         $payloadKey = $this->payloadKey($key);
         $singleStore = $this->usesSingleStore();
-        $localHit = $this->localCache->readEnvelope($this->localStore(), $payloadKey, ! $singleStore);
-        $envelope = $localHit['envelope'];
+        $envelope = $this->localCache->readEnvelope($this->localStore(), $payloadKey, ! $singleStore);
 
         if ($envelope === null && ! $singleStore) {
             $envelope = $this->distributedEnvelope($payloadKey);
@@ -104,9 +103,8 @@ final class HybridCacheManager
         $singleStore = $this->usesSingleStore();
 
         $localStore = $this->localStore();
-        $localHit = $this->localCache->readEnvelope($localStore, $payloadKey, ! $singleStore);
-        $localEnvelope = $localHit['envelope'];
-        $localActiveSlot = $localHit['activeSlot'];
+        $localActiveSlot = null;
+        $localEnvelope = $this->localCache->readEnvelope($localStore, $payloadKey, ! $singleStore, $localActiveSlot);
 
         if ($localEnvelope?->isFresh($now)) {
             return $localEnvelope->value;

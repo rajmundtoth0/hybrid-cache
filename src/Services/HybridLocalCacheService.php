@@ -12,18 +12,12 @@ final class HybridLocalCacheService
     private const SLOT_A = 'a';
     private const SLOT_B = 'b';
 
-    /**
-     * @return array{envelope: ?CacheEnvelope, activeSlot: ?string}
-     */
-    public function readEnvelope(Repository $store, string $payloadKey, bool $useActivePointer = true): array
+    public function readEnvelope(Repository $store, string $payloadKey, bool $useActivePointer = true, ?string &$activeSlot = null): ?CacheEnvelope
     {
         $activeSlot = $useActivePointer ? $this->readActiveSlot($store, $payloadKey) : null;
         $targetKey = $activeSlot === null ? $payloadKey : $this->slotKey($payloadKey, $activeSlot);
 
-        return [
-            'envelope' => CacheEnvelope::fromStored($store->get($targetKey)),
-            'activeSlot' => $activeSlot,
-        ];
+        return CacheEnvelope::fromStored($store->get($targetKey));
     }
 
     public function persistEnvelope(Repository $store, string $payloadKey, CacheEnvelope $envelope, int $ttl): bool

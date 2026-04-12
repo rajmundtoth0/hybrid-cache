@@ -54,10 +54,11 @@ it('cleans invalid pointers and falls back to the base key', function (): void {
     Cache::store('local-array')->put($payloadKey.':active', 'invalid', 60);
     Cache::store('local-array')->put($payloadKey, CacheEnvelope::fresh('base', 60, 0, time())->toArray(), 60);
 
-    $hit = $service->readEnvelope(Cache::store('local-array'), $payloadKey, true);
+    $activeSlot = null;
+    $envelope = $service->readEnvelope(Cache::store('local-array'), $payloadKey, true, $activeSlot);
 
-    expect($hit['envelope']?->value)->toBe('base')
-        ->and($hit['activeSlot'])->toBeNull()
+    expect($envelope?->value)->toBe('base')
+        ->and($activeSlot)->toBeNull()
         ->and(Cache::store('local-array')->get($payloadKey.':active'))->toBeNull();
 });
 
