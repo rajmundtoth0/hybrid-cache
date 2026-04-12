@@ -10,10 +10,12 @@ use DateInterval;
 use DateTimeImmutable;
 use DateTimeInterface;
 use Illuminate\Cache\Repository;
-use UnitEnum;
+use rajmundtoth0\HybridCache\Support\NormalizesHybridCacheKeys;
 
 final class HybridCacheRepository extends Repository
 {
+    use NormalizesHybridCacheKeys;
+
     public function __construct(
         private readonly HybridCacheManager $manager,
         HybridCacheStore $store,
@@ -36,19 +38,6 @@ final class HybridCacheRepository extends Repository
             callback: $callback,
             staleTtl: max(0, $staleSeconds - $freshSeconds),
         );
-    }
-
-    private function normalizeKey(string|UnitEnum $key): string
-    {
-        if (is_string($key)) {
-            return $key;
-        }
-
-        if ($key instanceof BackedEnum) {
-            return (string) $key->value;
-        }
-
-        return $key->name;
     }
 
     private function isSupportedTtl(mixed $ttl): bool

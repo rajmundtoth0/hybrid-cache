@@ -4,14 +4,15 @@ declare(strict_types=1);
 
 namespace rajmundtoth0\HybridCache;
 
-use BackedEnum;
 use Illuminate\Contracts\Cache\Lock;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\Store;
-use UnitEnum;
+use rajmundtoth0\HybridCache\Support\NormalizesHybridCacheKeys;
 
 final class HybridCacheStore implements LockProvider, Store
 {
+    use NormalizesHybridCacheKeys;
+
     public function __construct(
         private readonly HybridCacheManager $manager,
     ) {
@@ -95,19 +96,6 @@ final class HybridCacheStore implements LockProvider, Store
     public function restoreLock($name, $owner): Lock
     {
         return $this->manager->restoreLock($this->normalizeKey($name), $owner);
-    }
-
-    private function normalizeKey(string|UnitEnum $key): string
-    {
-        if (is_string($key)) {
-            return $key;
-        }
-
-        if ($key instanceof BackedEnum) {
-            return (string) $key->value;
-        }
-
-        return $key->name;
     }
 
     private function normalizeDelta(mixed $value): int

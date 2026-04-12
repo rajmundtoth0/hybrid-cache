@@ -20,23 +20,12 @@ final class HybridCacheServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/hybrid-cache.php', 'hybrid-cache');
+        $buildManager = fn (Application $app, array $storeConfig = []): HybridCacheManager => $this->buildManager($app, $storeConfig);
 
         $this->app->singleton(HybridLocalCacheService::class, static fn (): HybridLocalCacheService => new HybridLocalCacheService());
 
-        $this->app->singleton(HybridCacheManager::class, function (Application $app): HybridCacheManager {
-            $configService = $app->make(HybridCacheConfigService::class);
-            $config = $configService->make();
-
-            return new HybridCacheManager(
-                app: $app,
-                cache: $app->make('cache'),
-                config: $config,
-                lockService: new HybridCacheLockService(
-                    cache: $app->make('cache'),
-                    config: $config,
-                ),
-                localCache: $app->make(HybridLocalCacheService::class),
-            );
+        $this->app->singleton(HybridCacheManager::class, function (Application $app) use ($buildManager): HybridCacheManager {
+            return $buildManager($app);
         });
 
         $this->app->singleton(HybridCacheRefresherService::class, function (Application $app): HybridCacheRefresherService {
@@ -49,21 +38,10 @@ final class HybridCacheServiceProvider extends ServiceProvider
 
         $this->app->alias(HybridCacheManager::class, 'hybrid-cache');
 
-        $this->app->booting(function (): void {
-            Cache::extend('hybrid', function (Application $app, array $config): HybridCacheRepository {
+        $this->app->booting(function () use ($buildManager): void {
+            Cache::extend('hybrid', function (Application $app, array $config) use ($buildManager): HybridCacheRepository {
                 /** @var array<string, mixed> $config */
-                $configService = $app->make(HybridCacheConfigService::class);
-                $hybridConfig = $configService->make($config);
-                $manager = new HybridCacheManager(
-                    app: $app,
-                    cache: $app->make('cache'),
-                    config: $hybridConfig,
-                    lockService: new HybridCacheLockService(
-                        cache: $app->make('cache'),
-                        config: $hybridConfig,
-                    ),
-                    localCache: $app->make(HybridLocalCacheService::class),
-                );
+                $manager = $buildManager($app, $config);
 
                 return new HybridCacheRepository($manager, new HybridCacheStore($manager));
             });
@@ -141,5 +119,24 @@ final class HybridCacheServiceProvider extends ServiceProvider
         $path = $this->app->make('config')->get('hybrid-cache.refresh.http.path', '/hybrid-cache/refresh');
 
         return is_string($path) && $path !== '' ? $path : '/hybrid-cache/refresh';
+    }
+
+    /**
+     * @param array<string, mixed> $storeConfig
+     */
+    private function buildManager(Application $app, array $storeConfig = []): HybridCacheManager
+    {
+        $config = $app->make(HybridCacheConfigService::class)->make($storeConfig);
+
+        return new HybridCacheManager(
+            app: $app,
+            cache: $app->make('cache'),
+            config: $config,
+            lockService: new HybridCacheLockService(
+                cache: $app->make('cache'),
+                config: $config,
+            ),
+            localCache: $app->make(HybridLocalCacheService::class),
+        );
     }
 }
