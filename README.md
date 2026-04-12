@@ -305,6 +305,31 @@ Optional refresh coordination:
 
 This keeps the first version small while still covering the critical production case of stale serving plus refresh coordination.
 
+## Behavior guarantees
+
+These are the invariants the package is designed to uphold. They are verified by the test suite.
+
+**The distributed store is the shared source of truth.**
+All nodes read from and write to the same distributed store. Local state is a read-through cache; it caches distributed results for the current node only and is never authoritative.
+
+**Distributed reads do not depend on pointer state.**
+The distributed store is always queried by base key. Pointer keys (`:active`, `:slot:*`) live in the local store only and are never consulted during a distributed read. A corrupt or missing local pointer never prevents a distributed lookup.
+
+**A corrupt local pointer never breaks a simple read.**
+If the local pointer holds an invalid value, it is cleared and the read falls back to the base key. If the base key also has no payload, the read returns `null` without throwing.
+
+**Stale values do not overwrite fresher state.**
+Stale refreshes are lock-protected. Once a fresh envelope is committed, a concurrent stale path cannot overwrite it because the distributed lock is released only after the fresh payload is written.
+
+**Coordinated refresh always writes to the inactive slot.**
+`coordinatedRefresh()` writes to the slot that is not currently named by the active pointer, then flips the pointer atomically. Readers see the old slot until the flip, then see the new envelope — there is no window where the active slot contains a partially-written payload.
+
+**Hydration preserves the envelope's original timestamps.**
+When the local store is hydrated from distributed data, the `fresh_until` and `stale_until` timestamps are copied as-is. A stale distributed envelope is hydrated as stale; a fresh envelope is hydrated as fresh. Hydration never extends or shortens the serveable window.
+
+**Single-store mode is explicitly supported.**
+When `local_store` and `distributed_store` name the same cache driver, the package operates as a single-store stale-while-revalidate cache. Local-only mechanics (active pointers, slot writes) are automatically bypassed. No pointer-specific behavior is required for correctness.
+
 ## Testing and quality tools
 
 - Tests: Pest

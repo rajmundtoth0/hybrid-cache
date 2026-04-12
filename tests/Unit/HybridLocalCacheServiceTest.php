@@ -75,3 +75,38 @@ it('writes coordinated refreshes to the inactive slot and flips the pointer', fu
         ->and(Cache::store('local-array')->get($payloadKey.':active'))->toBe('b')
         ->and(Cache::store('local-array')->get($payloadKey.':slot:b'))->toBeArray();
 });
+
+it('defaults to slot b when no prior pointer exists during a coordinated refresh', function (): void {
+    $service = new HybridLocalCacheService();
+    $payloadKey = 'hybrid-cache:no-prior-pointer';
+    $envelope = CacheEnvelope::fresh('value', 60, 0, time());
+
+    // No existing pointer → defaults to SLOT_A as active → inactive is SLOT_B
+    $slot = $service->persistRefreshedEnvelope(Cache::store('local-array'), $payloadKey, $envelope, 60);
+
+    expect($slot)->toBe('b')
+        ->and(Cache::store('local-array')->get($payloadKey.':active'))->toBe('b')
+        ->and(Cache::store('local-array')->get($payloadKey.':slot:b'))->toBeArray();
+});
+
+it('hydrating a stale envelope preserves its stale semantics in local storage', function (): void {
+    $service = new HybridLocalCacheService();
+    $payloadKey = 'hybrid-cache:hydrate-stale-semantics';
+    $now = time();
+
+    // Envelope is stale: past freshUntil but before staleUntil
+    $staleEnvelope = new CacheEnvelope(
+        value: 'stale-value',
+        freshUntil: $now - 10,
+        staleUntil: $now + 50,
+    );
+
+    $service->hydrateEnvelope(Cache::store('local-array'), $payloadKey, $staleEnvelope, $now, null);
+
+    $stored = Cache::store('local-array')->get($payloadKey);
+
+    expect($stored)->toBeArray()
+        ->and($stored['value'])->toBe('stale-value')
+        ->and($stored['fresh_until'])->toBeLessThan($now)  // still marked stale
+        ->and($stored['stale_until'])->toBeGreaterThan($now); // still within serveable window
+});

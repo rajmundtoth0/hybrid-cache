@@ -12,7 +12,7 @@ use Illuminate\Contracts\Cache\LockProvider;
 use rajmundtoth0\HybridCache\CacheEnvelope;
 use rajmundtoth0\HybridCache\Config\HybridCacheConfig;
 
-class HybridCacheLockService
+final class HybridCacheLockService
 {
     public function __construct(
         private readonly CacheManager $cache,
@@ -25,6 +25,13 @@ class HybridCacheLockService
         return $this->config->keyPrefix.'lock:'.$key;
     }
 
+    /**
+     * Tries to acquire an exclusive refresh lock in the distributed store.
+     * Returns a release closure on success, or null when another worker already holds the lock.
+     * Uses native lock primitives when the store supports them; falls back to an atomic add key.
+     *
+     * @return (Closure(): bool)|null
+     */
     public function acquireRefreshLock(string $lockKey): ?Closure
     {
         $store = $this->distributedStore();
@@ -49,6 +56,9 @@ class HybridCacheLockService
     }
 
     /**
+     * Acquires the refresh lock, runs $onAcquired, and releases unconditionally.
+     * Returns null when the lock is already held (another worker is currently refreshing).
+     *
      * @param Closure(): CacheEnvelope $onAcquired
      */
     public function withRefreshLock(string $lockKey, Closure $onAcquired): ?CacheEnvelope
@@ -64,6 +74,15 @@ class HybridCacheLockService
         } finally {
             $release();
         }
+    }
+
+    /**
+     * Removes a stale refresh lock key from the distributed store.
+     * Called during forget() to ensure no orphaned lock key blocks future refreshes.
+     */
+    public function clearLock(string $lockKey): void
+    {
+        $this->distributedStore()->forget($lockKey);
     }
 
     public function makeLock(string $name, int $seconds = 0, string|int|null $owner = null): Lock

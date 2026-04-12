@@ -20,6 +20,12 @@ final class HybridCacheManager
 {
     private const DEFAULT_STORE_TTL = 60;
     private const FOREVER_TTL = 315360000;
+    /**
+     * When a concurrent request holds the refresh lock, we poll the distributed store
+     * for the result instead of computing the value redundantly.
+     * 5 attempts × 50 ms = up to 250 ms wait — enough to cover typical background
+     * refresh work while keeping the request latency impact bounded.
+     */
     private const DISTRIBUTED_RETRY_ATTEMPTS = 5;
     private const DISTRIBUTED_RETRY_DELAY_US = 50_000;
     public function __construct(
@@ -89,6 +95,18 @@ final class HybridCacheManager
         return $this->increment($key, $value * -1);
     }
 
+    /**
+     * Hot read path — priority order:
+     *   1. Local fresh  → return immediately (no distributed read)
+     *   2. Distributed fresh  → hydrate local, return
+     *   3. Distributed stale  → hydrate local, schedule refresh, return stale value
+     *   4. Local stale only   → schedule refresh, return stale value (distributed unavailable)
+     *   5. Miss → compute synchronously (waits on lock; falls back if distributed becomes
+     *             available while waiting)
+     *
+     * In single-store mode steps 2-4 are skipped: the local and distributed stores are the
+     * same, so hydration is a no-op and pointer logic is irrelevant.
+     */
     public function flexible(
         string $key,
         int|DateInterval|DateTimeInterface $ttl,
@@ -142,9 +160,8 @@ final class HybridCacheManager
         $payloadKey = $this->payloadKey($key);
         $lockKey = $this->lockService->lockKey($key);
 
-        $distributed = $this->distributedStore();
-        $forgot = $distributed->forget($payloadKey);
-        $distributed->forget($lockKey);
+        $forgot = $this->distributedStore()->forget($payloadKey);
+        $this->lockService->clearLock($lockKey);
 
         if (! $this->usesSingleStore()) {
             $this->localStore()->forget($payloadKey);
@@ -323,6 +340,11 @@ final class HybridCacheManager
         return $envelope;
     }
 
+    /**
+     * Writes an envelope to the distributed store and (when using separate stores) the local layer.
+     * The distributed write is authoritative: a local write failure does not roll back the distributed write.
+     * In single-store mode the local write is omitted; the distributed write is the only copy.
+     */
     private function persistEnvelope(string $payloadKey, CacheEnvelope $envelope, int $now): bool
     {
         $ttl = max(1, $envelope->secondsUntilExpiry($now));
@@ -339,6 +361,11 @@ final class HybridCacheManager
         return $distributedWritten && $localWritten;
     }
 
+    /**
+     * Polls the distributed store while another worker holds the refresh lock.
+     * Returns the distributed envelope as soon as it appears, or null if the
+     * wait window elapses without a result (caller falls back to computing the value).
+     */
     private function awaitDistributedPayload(string $payloadKey): ?CacheEnvelope
     {
         for ($attempt = 0; $attempt < self::DISTRIBUTED_RETRY_ATTEMPTS; $attempt++) {

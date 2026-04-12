@@ -212,15 +212,46 @@ it('single-store mode preserves stale-while-revalidate behavior', function (): v
         localCache: new HybridLocalCacheService(),
     );
 
-    Cache::store('distributed-array')->put('hybrid-cache:single-swr', [
-        'value' => 'stale-value',
-        'fresh_until' => time() - 10,
+    Cache::store('distributed-array')->put('hybrid-cache:swr-single', [
+        'value' => 'stale',
+        'fresh_until' => time() - 5,
         'stale_until' => time() + 60,
-    ], 60);
+    ], 65);
 
-    $served = $manager->flexible('single-swr', 30, fn (): string => 'fresh-value', 30);
-    $next = $manager->flexible('single-swr', 30, fn (): string => 'newer-value', 30);
+    // In console (test env) the stale refresh runs synchronously.
+    $served = $manager->flexible('swr-single', 30, fn (): string => 'fresh', 60);
+    $next = $manager->get('swr-single');
 
-    expect($served)->toBe('stale-value')
-        ->and($next)->toBe('fresh-value');
+    expect($served)->toBe('stale')
+        ->and($next)->toBe('fresh');
+});
+
+it('does not recompute when a fresh payload already exists', function (): void {
+    $calls = 0;
+
+    HybridCache::flexible('already-fresh', 60, fn (): string => 'first');
+
+    $value = HybridCache::flexible(
+        key: 'already-fresh',
+        ttl: 60,
+        callback: function () use (&$calls): string {
+            $calls++;
+
+            return 'recomputed';
+        },
+    );
+
+    expect($value)->toBe('first')
+        ->and($calls)->toBe(0);
+});
+
+it('returns null gracefully when local pointer is corrupt and no fallback payload exists', function (): void {
+    $manager = app(HybridCacheManager::class);
+
+    Cache::store('local-array')->put('hybrid-cache:orphan-pointer:active', 'invalid', 60);
+
+    $value = $manager->get('orphan-pointer');
+
+    expect($value)->toBeNull()
+        ->and(Cache::store('local-array')->get('hybrid-cache:orphan-pointer:active'))->toBeNull();
 });
