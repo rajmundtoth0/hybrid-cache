@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace rajmundtoth0\HybridCache\Support;
+namespace rajmundtoth0\HybridCache\Utils;
 
 use BackedEnum;
 use UnitEnum;
 
-trait NormalizesHybridCacheKeys
+final class KeyNormalizer
 {
-    private function normalizeKey(string|UnitEnum $key): string
+    public static function normalize(string|UnitEnum $key): string
     {
         if (is_string($key)) {
             return $key;

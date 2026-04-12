@@ -5,17 +5,14 @@ declare(strict_types=1);
 namespace rajmundtoth0\HybridCache;
 
 use Closure;
-use BackedEnum;
 use DateInterval;
 use DateTimeImmutable;
 use DateTimeInterface;
 use Illuminate\Cache\Repository;
-use rajmundtoth0\HybridCache\Support\NormalizesHybridCacheKeys;
+use rajmundtoth0\HybridCache\Utils\KeyNormalizer;
 
 final class HybridCacheRepository extends Repository
 {
-    use NormalizesHybridCacheKeys;
-
     public function __construct(
         private readonly HybridCacheManager $manager,
         HybridCacheStore $store,
@@ -33,7 +30,7 @@ final class HybridCacheRepository extends Repository
         $staleSeconds = $this->normalizeTtlToSeconds($staleTtl);
 
         return $this->manager->flexible(
-            key: $this->normalizeKey($key),
+            key: KeyNormalizer::normalize($key),
             ttl: $freshSeconds,
             callback: $callback,
             staleTtl: max(0, $staleSeconds - $freshSeconds),
