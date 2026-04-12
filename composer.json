@@ -52,6 +52,7 @@
     },
     "scripts": {
         "test": "vendor/bin/pest",
+        "test-coverage": "XDEBUG_MODE=coverage vendor/bin/pest --coverage-text --coverage-clover=build/coverage/clover.xml",
         "analyse": "vendor/bin/phpstan analyse --memory-limit=1G",
         "format": "vendor/bin/php-cs-fixer fix --allow-risky=yes",
         "format-ci": "vendor/bin/php-cs-fixer fix --allow-risky=yes --dry-run --diff --ansi",

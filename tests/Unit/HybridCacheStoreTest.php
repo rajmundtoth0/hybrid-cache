@@ -2,8 +2,12 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Cache;
 use rajmundtoth0\HybridCache\HybridCacheManager;
 use rajmundtoth0\HybridCache\HybridCacheStore;
+use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
+use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
+use rajmundtoth0\HybridCache\Tests\Support\FailingStore;
 
 enum BackedKey: string
 {
@@ -45,6 +49,38 @@ it('throws for non-numeric increments', function (): void {
 
     expect(fn () => $store->increment('counter', 'nope'))
         ->toThrow(InvalidArgumentException::class, 'Delta must be numeric.');
+});
+
+it('supports decrement with numeric-string deltas', function (): void {
+    $manager = app(HybridCacheManager::class);
+    $store = new HybridCacheStore($manager);
+
+    $store->put('counter', 5, 60);
+
+    expect($store->decrement('counter', '2'))->toBe(3)
+        ->and($store->get('counter'))->toBe(3);
+});
+
+it('returns false from putMany when any write fails', function (): void {
+    Cache::extend('failing-store', fn ($app, array $config) => $app['cache']->repository(new FailingStore(), $config));
+    config()->set('cache.stores.failing-store', ['driver' => 'failing-store']);
+
+    $config = app(HybridCacheConfigService::class)->make([
+        'local_store' => 'local-array',
+        'distributed_store' => 'failing-store',
+    ]);
+    $manager = new HybridCacheManager(
+        app: app(),
+        cache: app('cache'),
+        config: $config,
+        lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+    );
+    $store = new HybridCacheStore($manager);
+
+    expect($store->putMany([
+        'plain-1' => 'one',
+        'plain-2' => 'two',
+    ], 60))->toBeFalse();
 });
 
 it('supports forever, forget, flush, and lock operations', function (): void {

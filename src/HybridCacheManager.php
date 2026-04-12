@@ -11,9 +11,9 @@ use DateTimeInterface;
 use Illuminate\Cache\CacheManager;
 use Illuminate\Cache\Repository;
 use Illuminate\Contracts\Cache\Lock;
-use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Foundation\Application;
 use rajmundtoth0\HybridCache\Config\HybridCacheConfig;
+use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
 
 final class HybridCacheManager
 {
@@ -28,6 +28,7 @@ final class HybridCacheManager
         private readonly Application $app,
         private readonly CacheManager $cache,
         private readonly HybridCacheConfig $config,
+        private readonly HybridCacheLockService $lockService,
     ) {
     }
 
@@ -57,9 +58,8 @@ final class HybridCacheManager
         $envelope = CacheEnvelope::fresh($value, $freshTtl, 0, $now);
 
         $payloadKey = $this->payloadKey($key);
-        $this->persistEnvelope($payloadKey, $envelope, $now);
 
-        return true;
+        return $this->persistEnvelope($payloadKey, $envelope, $now);
     }
 
     public function forever(string $key, mixed $value): bool
@@ -69,9 +69,7 @@ final class HybridCacheManager
         $now = time();
         $envelope = CacheEnvelope::fresh($value, $ttl, 0, $now);
 
-        $this->persistEnvelope($payloadKey, $envelope, $now);
-
-        return true;
+        return $this->persistEnvelope($payloadKey, $envelope, $now);
     }
 
     public function increment(string $key, int $value = 1): int|bool
@@ -103,7 +101,7 @@ final class HybridCacheManager
         $freshTtl = $this->normalizeFreshTtl($ttl);
         $staleWindow = $this->normalizeWindow($staleTtl ?? $this->defaultStaleTtl());
         $payloadKey = $this->payloadKey($key);
-        $lockKey = $this->lockKey($key);
+        $lockKey = $this->lockService->lockKey($key);
         $now = time();
 
         $localStore = $this->localStore();
@@ -146,7 +144,7 @@ final class HybridCacheManager
     public function forget(string $key): bool
     {
         $payloadKey = $this->payloadKey($key);
-        $lockKey = $this->lockKey($key);
+        $lockKey = $this->lockService->lockKey($key);
 
         $distributed = $this->distributedStore();
         $forgot = $distributed->forget($payloadKey);
@@ -172,22 +170,12 @@ final class HybridCacheManager
 
     public function lock(string $name, int $seconds = 0, string|int|null $owner = null): Lock
     {
-        $backend = $this->distributedStore()->getStore();
-
-        if (! $backend instanceof LockProvider) {
-            throw new \BadMethodCallException('The configured distributed cache store does not support locks.');
-        }
-
-        $lockKey = $this->lockKey($name);
-
-        return ! $owner
-            ? $backend->lock($lockKey, $seconds)
-            : $backend->restoreLock($lockKey, (string) $owner);
+        return $this->lockService->makeLock($name, $seconds, $owner);
     }
 
     public function restoreLock(string $name, string|int $owner): Lock
     {
-        return $this->lock($name, owner: $owner);
+        return $this->lockService->restoreLock($name, $owner);
     }
 
     public function coordinatedRefresh(
@@ -197,8 +185,8 @@ final class HybridCacheManager
         int|DateInterval|DateTimeInterface|null $staleTtl = null,
     ): RefreshResult {
         $payloadKey = $this->payloadKey($key);
-        $lockKey = $this->lockKey($key);
-        $release = $this->acquireRefreshLock($lockKey);
+        $lockKey = $this->lockService->lockKey($key);
+        $release = $this->lockService->acquireRefreshLock($lockKey);
 
         if ($release === null) {
             return RefreshResult::alreadyRefreshing($key);
@@ -302,7 +290,7 @@ final class HybridCacheManager
     ): ?CacheEnvelope {
         $storeFresh = fn (): CacheEnvelope => $this->storeFreshPayload($payloadKey, $callback, $freshTtl, $staleWindow);
 
-        return $this->withRefreshLock(
+        return $this->lockService->withRefreshLock(
             lockKey: $lockKey,
             onAcquired: $storeFresh,
         );
@@ -317,7 +305,7 @@ final class HybridCacheManager
     ): CacheEnvelope {
         $storeFresh = fn (): CacheEnvelope => $this->storeFreshPayload($payloadKey, $callback, $freshTtl, $staleWindow);
 
-        $refreshed = $this->withRefreshLock(lockKey: $lockKey, onAcquired: $storeFresh);
+        $refreshed = $this->lockService->withRefreshLock(lockKey: $lockKey, onAcquired: $storeFresh);
 
         if ($refreshed !== null) {
             return $refreshed;
@@ -344,26 +332,31 @@ final class HybridCacheManager
         return $envelope;
     }
 
-    private function persistEnvelope(string $payloadKey, CacheEnvelope $envelope, int $now): void
+    private function persistEnvelope(string $payloadKey, CacheEnvelope $envelope, int $now): bool
     {
         $ttl = max(1, $envelope->secondsUntilExpiry($now));
 
         $distributed = $this->distributedStore();
-        $distributed->put($payloadKey, $envelope->toArray(), $ttl);
+        $distributedWritten = $distributed->put($payloadKey, $envelope->toArray(), $ttl);
 
-        if (! $this->usesSingleStore()) {
-            $local = $this->localStore();
-            $activeSlot = $this->readActiveSlot($local, $payloadKey);
-            $targetKey = $activeSlot === null ? $payloadKey : $this->slotKey($payloadKey, $activeSlot);
-
-            if ($activeSlot !== null) {
-                $this->setActiveSlot($local, $payloadKey, $activeSlot, $ttl);
-            } else {
-                $this->clearActiveSlot($local, $payloadKey);
-            }
-
-            $local->put($targetKey, $envelope->toArray(), $ttl);
+        if ($this->usesSingleStore()) {
+            return $distributedWritten;
         }
+
+        $local = $this->localStore();
+        $activeSlot = $this->readActiveSlot($local, $payloadKey);
+        $targetKey = $activeSlot === null ? $payloadKey : $this->slotKey($payloadKey, $activeSlot);
+        $pointerWritten = true;
+
+        if ($activeSlot !== null) {
+            $pointerWritten = $this->setActiveSlot($local, $payloadKey, $activeSlot, $ttl);
+        } else {
+            $this->clearActiveSlot($local, $payloadKey);
+        }
+
+        $localWritten = $local->put($targetKey, $envelope->toArray(), $ttl);
+
+        return $distributedWritten && $pointerWritten && $localWritten;
     }
 
     private function hydrateLocal(string $payloadKey, CacheEnvelope $envelope, int $now, ?string $activeSlot): void
@@ -410,47 +403,6 @@ final class HybridCacheManager
             'envelope' => null,
             'activeSlot' => null,
         ];
-    }
-
-    /**
-     * @param Closure(): CacheEnvelope $onAcquired
-     */
-    private function withRefreshLock(string $lockKey, Closure $onAcquired): ?CacheEnvelope
-    {
-        $release = $this->acquireRefreshLock($lockKey);
-
-        if ($release === null) {
-            return null;
-        }
-
-        try {
-            return $onAcquired();
-        } finally {
-            $release();
-        }
-    }
-
-    private function acquireRefreshLock(string $lockKey): ?Closure
-    {
-        $store = $this->distributedStore();
-        $backend = $store->getStore();
-        $lockTtl = $this->lockTtl();
-
-        if ($backend instanceof LockProvider) {
-            $lock = $backend->lock($lockKey, $lockTtl);
-
-            if (! $lock->get()) {
-                return null;
-            }
-
-            return fn (): bool => $lock->release();
-        }
-
-        if (! $store->add($lockKey, true, $lockTtl)) {
-            return null;
-        }
-
-        return fn (): bool => $store->forget($lockKey);
     }
 
     public function prefix(): string
@@ -521,11 +473,6 @@ final class HybridCacheManager
         return $activeSlot === self::SLOT_A ? self::SLOT_B : self::SLOT_A;
     }
 
-    private function lockKey(string $key): string
-    {
-        return $this->prefix().'lock:'.$key;
-    }
-
     private function groupVersionKey(string $group): string
     {
         return $this->prefix().'group:'.$group.':version';
@@ -534,11 +481,6 @@ final class HybridCacheManager
     private function defaultStaleTtl(): int
     {
         return $this->config->staleTtl;
-    }
-
-    private function lockTtl(): int
-    {
-        return $this->config->lockTtl;
     }
 
     private function usesSingleStore(): bool

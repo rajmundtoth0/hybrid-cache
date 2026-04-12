@@ -1,23 +1,32 @@
 # Hybrid Cache
 
-Hybrid Cache is a Laravel 12+ package for application-level caching with three opinionated behaviors out of the box:
+[![CI](https://github.com/rajmundtoth0/hybrid-cache/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/rajmundtoth0/hybrid-cache/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](https://github.com/rajmundtoth0/hybrid-cache/actions/workflows/ci.yml)
+[![PHP](https://img.shields.io/badge/PHP-8.2%2B-777bb4)](https://www.php.net/)
 
-- a local cache layer for fast reads on the current node
-- a distributed cache layer for shared state across nodes
-- managed stale-while-revalidate semantics for controlled refreshes under load
+Hybrid Cache is a Laravel 12+ package for application-level caching with a simple default path:
 
-It is designed for the common case where a Laravel app wants a small, predictable API and production-safe defaults without building a custom two-tier caching strategy from scratch.
+- pick a TTL
+- cache the value locally and remotely
+- let the value expire naturally
+- do not require remote invalidation machinery to get started
+
+If that is all you need, the package stays small and predictable. When you need more, it also supports a local cache layer for fast reads on the current node, a distributed cache layer for shared state across nodes, and stale-while-revalidate semantics for controlled refreshes under load.
+
+The intent is to make the common case easy first: use TTL-based caching without building a custom invalidation system, then opt into coordinated refresh and operational tooling only when your workload actually needs it.
 
 ## Why this package exists
 
-Laravel gives you strong cache primitives, but most applications still have to assemble the same pieces themselves when they want all of the following at once:
+Most applications do not need remote invalidation as their first step. They need a cache key, a TTL, and behavior that stays understandable under load.
+
+Laravel gives you strong cache primitives, but once an application wants to combine a local cache, a shared cache, and safe refresh behavior, teams usually end up assembling the same pieces themselves:
 
 - a fast local layer
 - a shared distributed layer
 - stale reads during refresh windows
 - refresh coordination to avoid stampedes
 
-This package combines that behavior into a single Laravel-native abstraction with minimal configuration and a deliberately small public API.
+This package wraps that behavior in a single Laravel-native abstraction with minimal configuration and a deliberately small public API.
 
 ## Installation
 
@@ -112,25 +121,40 @@ Recommended production setup:
 - distributed store: `redis`, `memcached`, or `database`, depending on your existing Laravel cache setup
 - stale window: keep it short and deliberate so stale responses are bounded and understandable
 
+If you want the simplest rollout, start with a TTL and let expiration do the invalidation work. You can add coordinated refresh later without changing the basic read API.
+
 If both configured stores are the same, the package still works, but it behaves as a single-store SWR cache instead of a true hybrid cache.
 
 ## Usage
 
-### Minimal usage
+### Start simple
+
+If you just want TTL-based caching without remote invalidation, start here:
 
 ```php
 use rajmundtoth0\HybridCache\Facades\HybridCache;
 
-$value = HybridCache::flexible(
-    key: 'users:index',
-    ttl: 3600,
-    callback: fn () => User::query()->latest()->take(50)->get(),
+$users = HybridCache::flexible(
+  key: 'users:index',
+  ttl: 300,
+  callback: fn () => User::query()->latest()->take(50)->get(),
 );
 ```
 
-### With an explicit stale window
+That gives you a small, production-friendly path:
+
+- set a TTL
+- cache locally for fast reads
+- share state through the distributed store
+- let expiration drive refresh instead of wiring custom invalidation flows
+
+For many applications, that is enough. You can stop there and keep the model simple.
+
+### Add a stale window when needed
 
 ```php
+use rajmundtoth0\HybridCache\Facades\HybridCache;
+
 $value = HybridCache::flexible(
     key: 'dashboard:stats',
     ttl: 300,
@@ -157,7 +181,7 @@ The `flexible` call on the `hybrid` store follows Laravel 12's native signature:
 - the second TTL value is the total serveable lifetime, including stale time
 - `[300, 330]` means 5 minutes fresh and up to 30 additional seconds stale
 
-Behavior summary:
+Behavior summary once you opt into stale serving:
 
 - fresh values are returned immediately from the local layer when available
 - local misses fall back to the distributed layer and rehydrate the local layer
@@ -171,9 +195,11 @@ Behavior summary:
 HybridCache::forget('dashboard:stats');
 ```
 
-## Coordinated refresh (HTTP / CLI)
+## Optional coordinated refresh (HTTP / CLI)
 
-This package can optionally expose a **signed POST endpoint** and an **Artisan command** to trigger coordinated refreshes on a node. These are disabled by default and are intended for trusted/internal use cases (deploy hooks, admin-triggered updates, orchestration, etc.).
+You do not need this section to get value from the package. The default path is still: cache with a TTL and let values expire naturally.
+
+If you want more control, the package can optionally expose a **signed POST endpoint** and an **Artisan command** to trigger coordinated refreshes on a node. These are disabled by default and are intended for trusted/internal use cases such as deploy hooks, admin-triggered updates, and orchestration.
 
 Key properties:
 
@@ -225,7 +251,7 @@ php artisan hybrid-cache:refresh dashboard:stats
 php artisan hybrid-cache:refresh --group=dashboard --all
 ```
 
-### Group versions (optional)
+### Optional group versions
 
 You can use group versions to implement **lazy group refresh** without wildcard deletion:
 
@@ -267,7 +293,7 @@ Read path:
 4. If the value is stale but still serveable, return it and coordinate a refresh.
 5. If the value is missing or expired, refresh and persist a new envelope.
 
-Refresh coordination:
+Optional refresh coordination:
 
 - the distributed store owns the refresh lock
 - if the underlying cache store supports native locks, the package uses them
@@ -278,6 +304,7 @@ This keeps the first version small while still covering the critical production 
 ## Testing and quality tools
 
 - Tests: Pest
+- CI: GitHub Actions runs tests on PHP 8.2, 8.3, and 8.4, plus a dedicated Xdebug coverage job
 - Static analysis: PHPStan at max level via Larastan
 - Static policy checks: `rajmundtoth0/phpstan-forbidden` to ban debugging and output constructs in package source
 - Formatting: PHP CS Fixer
@@ -286,14 +313,24 @@ Available commands:
 
 ```bash
 composer test
+composer test-coverage
 composer analyse
 composer format
 composer quality
 ```
 
+Coverage uses Xdebug:
+
+```bash
+XDEBUG_MODE=coverage composer test-coverage
+```
+
+The Clover report is written to `build/coverage/clover.xml`.
+
 There is also a small `Makefile` for the demo workflow:
 
 ```bash
+make coverage
 make benchmark-build
 make benchmark-run-with
 make benchmark-run-without
@@ -358,12 +395,12 @@ Measured on the included Redis-backed benchmark harness with:
 
 Results:
 
-| Scenario | Count | Avg | Median | P95 | Min | Max |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| With package, cold | 12 | 49.18ms | 43.89ms | 44.85ms | 42.56ms | 109.57ms |
-| Without package, cold | 12 | 47.50ms | 42.47ms | 43.58ms | 41.89ms | 101.51ms |
-| With package, warm | 40 | 0.21ms | 0.17ms | 0.29ms | 0.16ms | 0.95ms |
-| Without package, warm | 40 | 1.33ms | 1.26ms | 1.89ms | 0.96ms | 2.58ms |
+| Scenario              | Count |     Avg |  Median |     P95 |     Min |      Max |
+| --------------------- | ----: | ------: | ------: | ------: | ------: | -------: |
+| With package, cold    |    12 | 49.18ms | 43.89ms | 44.85ms | 42.56ms | 109.57ms |
+| Without package, cold |    12 | 47.50ms | 42.47ms | 43.58ms | 41.89ms | 101.51ms |
+| With package, warm    |    40 |  0.21ms |  0.17ms |  0.29ms |  0.16ms |   0.95ms |
+| Without package, warm |    40 |  1.33ms |  1.26ms |  1.89ms |  0.96ms |   2.58ms |
 
 Interpretation:
 
@@ -407,12 +444,12 @@ The package demo is expected to show lower cost on repeated local hits and smoot
 
 ## Comparison
 
-| Option | Good at | Less good at | Positioning relative to this package |
-| --- | --- | --- | --- |
+| Option                                                 | Good at                                    | Less good at                                                                                 | Positioning relative to this package                                                      |
+| ------------------------------------------------------ | ------------------------------------------ | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | Laravel `Cache::remember` and direct cache store usage | Simple caching with full framework control | Leaves two-tier orchestration, stale envelopes, and refresh coordination to application code | This package adds a focused, reusable hybrid cache pattern on top of Laravel's primitives |
-| Response cache packages | Caching whole HTTP responses | Not aimed at general application data or service-layer caching | This package targets arbitrary values, not full response caching |
-| Query cache packages | Caching Eloquent or query-builder output | Narrower scope and usually query-centric semantics | This package is general-purpose and not tied to ORM queries |
-| Single-store SWR helpers | Simple stale-while-revalidate behavior | Usually no explicit local+distributed layering | This package centers on a hybrid layout first and then layers SWR on top |
+| Response cache packages                                | Caching whole HTTP responses               | Not aimed at general application data or service-layer caching                               | This package targets arbitrary values, not full response caching                          |
+| Query cache packages                                   | Caching Eloquent or query-builder output   | Narrower scope and usually query-centric semantics                                           | This package is general-purpose and not tied to ORM queries                               |
+| Single-store SWR helpers                               | Simple stale-while-revalidate behavior     | Usually no explicit local+distributed layering                                               | This package centers on a hybrid layout first and then layers SWR on top                  |
 
 This package does not try to replace Laravel's cache system. It provides one specific pattern on top of it: a small, composable abstraction for hybrid caching with bounded stale reads.
 

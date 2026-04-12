@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Config\Repository as ConfigRepository;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
 
 it('builds config from hybrid-cache defaults', function (): void {
@@ -65,4 +66,16 @@ it('throws for invalid config types', function (): void {
 
     expect(fn () => app(HybridCacheConfigService::class)->make())
         ->toThrow(InvalidArgumentException::class);
+});
+
+it('uses hard-coded defaults when config keys are absent', function (): void {
+    $service = new HybridCacheConfigService(new ConfigRepository([]));
+
+    $config = $service->make();
+
+    expect($config->keyPrefix)->toBe('hybrid-cache:')
+        ->and($config->localStore)->toBe('file')
+        ->and($config->distributedStore)->toBe('file')
+        ->and($config->staleTtl)->toBe(300)
+        ->and($config->lockTtl)->toBe(30);
 });

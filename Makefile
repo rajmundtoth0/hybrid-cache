@@ -1,7 +1,10 @@
-.PHONY: quality benchmark-build benchmark-build-with benchmark-build-without benchmark-run-with benchmark-run-without benchmark-stop benchmark-hit benchmark-compose-up benchmark-compose-down benchmark-proper
+.PHONY: quality coverage benchmark-build benchmark-build-with benchmark-build-without benchmark-run-with benchmark-run-without benchmark-stop benchmark-hit benchmark-compose-up benchmark-compose-down benchmark-proper
 
 quality:
 	composer quality
+
+coverage:
+	composer test-coverage
 
 benchmark-build: benchmark-build-with benchmark-build-without
 

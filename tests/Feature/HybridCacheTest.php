@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Cache;
 use rajmundtoth0\HybridCache\Facades\HybridCache;
 use rajmundtoth0\HybridCache\HybridCacheManager;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
+use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
 
 it('returns the locally cached value without recomputing', function (): void {
     $calls = 0;
@@ -153,9 +154,10 @@ it('respects store-level overrides for prefix and stale ttl', function (): void 
     $manager = new HybridCacheManager(
         app: app(),
         cache: app('cache'),
-        config: app(HybridCacheConfigService::class)->make(
+        config: $hybridConfig = app(HybridCacheConfigService::class)->make(
             config('cache.stores.hybrid-overrides', [])
         ),
+        lockService: new HybridCacheLockService(cache: app('cache'), config: $hybridConfig),
     );
 
     $value = $manager->flexible('override-key', 1, fn (): string => 'override-value');

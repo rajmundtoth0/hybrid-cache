@@ -11,6 +11,7 @@ use Illuminate\Support\ServiceProvider;
 use rajmundtoth0\HybridCache\Console\HybridCacheRefreshCommand;
 use rajmundtoth0\HybridCache\Http\HybridCacheRefreshController;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
+use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
 use rajmundtoth0\HybridCache\Services\HybridCacheRefresherService;
 
 final class HybridCacheServiceProvider extends ServiceProvider
@@ -21,11 +22,16 @@ final class HybridCacheServiceProvider extends ServiceProvider
 
         $this->app->singleton(HybridCacheManager::class, function (Application $app): HybridCacheManager {
             $configService = $app->make(HybridCacheConfigService::class);
+            $config = $configService->make();
 
             return new HybridCacheManager(
                 app: $app,
                 cache: $app->make('cache'),
-                config: $configService->make(),
+                config: $config,
+                lockService: new HybridCacheLockService(
+                    cache: $app->make('cache'),
+                    config: $config,
+                ),
             );
         });
 
@@ -43,10 +49,15 @@ final class HybridCacheServiceProvider extends ServiceProvider
             Cache::extend('hybrid', function (Application $app, array $config): HybridCacheRepository {
                 /** @var array<string, mixed> $config */
                 $configService = $app->make(HybridCacheConfigService::class);
+                $hybridConfig = $configService->make($config);
                 $manager = new HybridCacheManager(
                     app: $app,
                     cache: $app->make('cache'),
-                    config: $configService->make($config),
+                    config: $hybridConfig,
+                    lockService: new HybridCacheLockService(
+                        cache: $app->make('cache'),
+                        config: $hybridConfig,
+                    ),
                 );
 
                 return new HybridCacheRepository($manager, new HybridCacheStore($manager));
@@ -70,12 +81,9 @@ final class HybridCacheServiceProvider extends ServiceProvider
             return;
         }
 
-        $config = $this->app->make('config');
-        $path = $config->get('hybrid-cache.refresh.http.path', '/hybrid-cache/refresh');
-        $path = is_string($path) && $path !== '' ? $path : '/hybrid-cache/refresh';
         $middleware = $this->refreshHttpMiddleware();
 
-        Route::post($path, HybridCacheRefreshController::class)
+        Route::post($this->refreshHttpPath(), HybridCacheRefreshController::class)
             ->middleware($middleware)
             ->name('hybrid-cache.refresh');
     }
@@ -121,5 +129,12 @@ final class HybridCacheServiceProvider extends ServiceProvider
         $value = $this->app->make('config')->get('hybrid-cache.refresh.http.enabled', false);
 
         return (bool) $value;
+    }
+
+    private function refreshHttpPath(): string
+    {
+        $path = $this->app->make('config')->get('hybrid-cache.refresh.http.path', '/hybrid-cache/refresh');
+
+        return is_string($path) && $path !== '' ? $path : '/hybrid-cache/refresh';
     }
 }

@@ -7,6 +7,7 @@ use rajmundtoth0\HybridCache\CacheEnvelope;
 use rajmundtoth0\HybridCache\HybridCacheManager;
 use rajmundtoth0\HybridCache\Enum\StatusEnum;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
+use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
 use rajmundtoth0\HybridCache\Tests\Support\FailingStore;
 use rajmundtoth0\HybridCache\Tests\Support\NoLockStore;
 use rajmundtoth0\HybridCache\Tests\Support\ThrowingIncrementStore;
@@ -142,13 +143,15 @@ it('fails when distributed writes fail', function (): void {
     Cache::extend('failing', fn ($app, array $config) => $app['cache']->repository(new FailingStore(true), $config));
     config()->set('cache.stores.failing', ['driver' => 'failing']);
 
+    $config = app(HybridCacheConfigService::class)->make([
+        'local_store' => 'local-array',
+        'distributed_store' => 'failing',
+    ]);
     $manager = new HybridCacheManager(
         app: app(),
         cache: app('cache'),
-        config: app(HybridCacheConfigService::class)->make([
-            'local_store' => 'local-array',
-            'distributed_store' => 'failing',
-        ]),
+        config: $config,
+        lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
     );
 
     $result = $manager->coordinatedRefresh('write-fail', fn (): string => 'value', 60);
@@ -160,13 +163,15 @@ it('uses the non-locking refresh path when locks are unavailable', function (): 
     Cache::extend('nolock', fn ($app, array $config) => $app['cache']->repository(new NoLockStore(), $config));
     config()->set('cache.stores.nolock', ['driver' => 'nolock']);
 
+    $config = app(HybridCacheConfigService::class)->make([
+        'local_store' => 'local-array',
+        'distributed_store' => 'nolock',
+    ]);
     $manager = new HybridCacheManager(
         app: app(),
         cache: app('cache'),
-        config: app(HybridCacheConfigService::class)->make([
-            'local_store' => 'local-array',
-            'distributed_store' => 'nolock',
-        ]),
+        config: $config,
+        lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
     );
 
     $result = $manager->coordinatedRefresh('nolock-key', fn (): string => 'value', 60);
@@ -178,13 +183,15 @@ it('falls back when group version increment fails', function (): void {
     Cache::extend('throwing', fn ($app, array $config) => $app['cache']->repository(new ThrowingIncrementStore(true), $config));
     config()->set('cache.stores.throwing', ['driver' => 'throwing']);
 
+    $config = app(HybridCacheConfigService::class)->make([
+        'local_store' => 'local-array',
+        'distributed_store' => 'throwing',
+    ]);
     $manager = new HybridCacheManager(
         app: app(),
         cache: app('cache'),
-        config: app(HybridCacheConfigService::class)->make([
-            'local_store' => 'local-array',
-            'distributed_store' => 'throwing',
-        ]),
+        config: $config,
+        lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
     );
 
     expect($manager->groupVersion('group'))->toBe(1)

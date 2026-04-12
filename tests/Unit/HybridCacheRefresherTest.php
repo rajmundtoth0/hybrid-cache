@@ -74,3 +74,24 @@ it('uses the default ttl when missing or invalid', function (): void {
 
     expect($result->status)->toBe(StatusEnum::REFRESHED->value);
 });
+
+it('skips empty and invalid matching prefixes while resolving a key', function (): void {
+    config()->set('hybrid-cache.refresh.prefixes', [
+        '' => [
+            'handler' => fn (string $key): string => 'empty-'.$key,
+            'ttl' => 60,
+        ],
+        'match:' => 'invalid',
+        'match:valid:' => [
+            'handler' => fn (string $key): string => 'value-'.$key,
+            'ttl' => 60,
+            'stale_ttl' => 0,
+        ],
+    ]);
+
+    $refresher = app(HybridCacheRefresherService::class);
+    $result = $refresher->refreshKey('match:valid:1');
+
+    expect($result->status)->toBe(StatusEnum::REFRESHED->value)
+        ->and(Cache::store('distributed-array')->get('hybrid-cache:match:valid:1'))->toBeArray();
+});

@@ -5,6 +5,12 @@
          colors="true"
          cacheDirectory="build/phpunit"
 >
+    <source>
+        <include>
+            <directory suffix=".php">src</directory>
+        </include>
+    </source>
+
     <testsuites>
         <testsuite name="default">
             <directory>tests</directory>
