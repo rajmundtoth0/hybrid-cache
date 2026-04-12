@@ -7,30 +7,8 @@ use rajmundtoth0\HybridCache\CacheEnvelope;
 use rajmundtoth0\HybridCache\HybridCacheManager;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
 use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
+use rajmundtoth0\HybridCache\Services\HybridLocalCacheService;
 use rajmundtoth0\HybridCache\Tests\Support\NoLockStore;
-
-it('throws on invalid active slots', function (): void {
-    $manager = app(HybridCacheManager::class);
-    $method = new ReflectionMethod($manager, 'setActiveSlot');
-    $method->setAccessible(true);
-
-    expect(fn () => $method->invoke($manager, Cache::store('local-array'), 'hybrid-cache:key', 'c', 60))
-        ->toThrow(\InvalidArgumentException::class);
-});
-
-it('skips local hydration when the envelope is already expired', function (): void {
-    $manager = app(HybridCacheManager::class);
-    $method = new ReflectionMethod($manager, 'hydrateLocal');
-    $method->setAccessible(true);
-
-    $now = time();
-    $payloadKey = 'hybrid-cache:expired';
-    $envelope = CacheEnvelope::fresh('value', 0, 0, $now);
-
-    $method->invoke($manager, $payloadKey, $envelope, $now, null);
-
-    expect(Cache::store('local-array')->get($payloadKey))->toBeNull();
-});
 
 it('uses the default store ttl for invalid values', function (): void {
     $manager = app(HybridCacheManager::class);
@@ -120,6 +98,7 @@ it('supports single-store operation', function (): void {
         cache: app('cache'),
         config: $config,
         lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+        localCache: new HybridLocalCacheService(),
     );
 
     $manager->put('single', 'value', 60);
@@ -137,6 +116,7 @@ it('flushes correctly when using a single store', function (): void {
         cache: app('cache'),
         config: $config,
         lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+        localCache: new HybridLocalCacheService(),
     );
 
     $manager->put('single-flush', 'value', 60);
@@ -212,25 +192,6 @@ it('hydrates from distributed payloads discovered while waiting for a lock', fun
         ->and(Cache::store('local-array')->get($payloadKey))->toBeArray();
 });
 
-it('skips local hydration entirely for single-store managers', function (): void {
-    $config = app(HybridCacheConfigService::class)->make([
-        'local_store' => 'distributed-array',
-        'distributed_store' => 'distributed-array',
-    ]);
-    $manager = new HybridCacheManager(
-        app: app(),
-        cache: app('cache'),
-        config: $config,
-        lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
-    );
-    $method = new ReflectionMethod($manager, 'hydrateLocal');
-    $method->setAccessible(true);
-
-    $method->invoke($manager, 'hybrid-cache:single-hydrate', CacheEnvelope::fresh('value', 60, 0, time()), time(), null);
-
-    expect(Cache::store('distributed-array')->get('hybrid-cache:single-hydrate'))->toBeNull();
-});
-
 it('returns null when waiting for distributed payloads times out', function (): void {
     $manager = app(HybridCacheManager::class);
     $method = new ReflectionMethod($manager, 'awaitDistributedPayload');
@@ -238,10 +199,7 @@ it('returns null when waiting for distributed payloads times out', function (): 
 
     $result = $method->invoke($manager, 'hybrid-cache:missing-distributed');
 
-    expect($result)->toBe([
-        'envelope' => null,
-        'activeSlot' => null,
-    ]);
+    expect($result)->toBeNull();
 });
 
 it('normalizes interval and datetime ttl windows', function (): void {
@@ -271,6 +229,7 @@ it('throws when locks are unsupported', function (): void {
         cache: app('cache'),
         config: $config,
         lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+        localCache: new HybridLocalCacheService(),
     );
 
     expect(fn () => $manager->lock('no-lock'))

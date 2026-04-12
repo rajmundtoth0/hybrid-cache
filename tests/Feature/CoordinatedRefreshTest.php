@@ -8,6 +8,7 @@ use rajmundtoth0\HybridCache\HybridCacheManager;
 use rajmundtoth0\HybridCache\Enum\StatusEnum;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
 use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
+use rajmundtoth0\HybridCache\Services\HybridLocalCacheService;
 use rajmundtoth0\HybridCache\Tests\Support\FailingStore;
 use rajmundtoth0\HybridCache\Tests\Support\NoLockStore;
 use rajmundtoth0\HybridCache\Tests\Support\ThrowingIncrementStore;
@@ -152,6 +153,7 @@ it('fails when distributed writes fail', function (): void {
         cache: app('cache'),
         config: $config,
         lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+        localCache: new HybridLocalCacheService(),
     );
 
     $result = $manager->coordinatedRefresh('write-fail', fn (): string => 'value', 60);
@@ -172,6 +174,7 @@ it('uses the non-locking refresh path when locks are unavailable', function (): 
         cache: app('cache'),
         config: $config,
         lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+        localCache: new HybridLocalCacheService(),
     );
 
     $result = $manager->coordinatedRefresh('nolock-key', fn (): string => 'value', 60);
@@ -192,6 +195,7 @@ it('falls back when group version increment fails', function (): void {
         cache: app('cache'),
         config: $config,
         lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+        localCache: new HybridLocalCacheService(),
     );
 
     expect($manager->groupVersion('group'))->toBe(1)

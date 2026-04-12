@@ -7,6 +7,7 @@ use rajmundtoth0\HybridCache\Facades\HybridCache;
 use rajmundtoth0\HybridCache\HybridCacheManager;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
 use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
+use rajmundtoth0\HybridCache\Services\HybridLocalCacheService;
 
 it('returns the locally cached value without recomputing', function (): void {
     $calls = 0;
@@ -158,6 +159,7 @@ it('respects store-level overrides for prefix and stale ttl', function (): void 
             config('cache.stores.hybrid-overrides', [])
         ),
         lockService: new HybridCacheLockService(cache: app('cache'), config: $hybridConfig),
+        localCache: new HybridLocalCacheService(),
     );
 
     $value = $manager->flexible('override-key', 1, fn (): string => 'override-value');
@@ -176,4 +178,49 @@ it('throws for invalid flexible ttl input', function (): void {
 
     expect(fn () => $store->flexible('invalid', 60, fn (): string => 'value'))
         ->toThrow(\InvalidArgumentException::class);
+});
+
+it('simple reads do not require pointer state', function (): void {
+    Cache::store('local-array')->put('hybrid-cache:simple-read:active', 'invalid', 60);
+    Cache::store('distributed-array')->put('hybrid-cache:simple-read', [
+        'value' => 'distributed-value',
+        'fresh_until' => time() + 60,
+        'stale_until' => time() + 120,
+    ], 120);
+
+    $value = HybridCache::flexible(
+        key: 'simple-read',
+        ttl: 60,
+        callback: fn (): string => 'recomputed',
+    );
+
+    expect($value)->toBe('distributed-value')
+        ->and(Cache::store('local-array')->get('hybrid-cache:simple-read'))->toBeArray()
+        ->and(Cache::store('local-array')->get('hybrid-cache:simple-read:active'))->toBeNull();
+});
+
+it('single-store mode preserves stale-while-revalidate behavior', function (): void {
+    $config = app(HybridCacheConfigService::class)->make([
+        'local_store' => 'distributed-array',
+        'distributed_store' => 'distributed-array',
+    ]);
+    $manager = new HybridCacheManager(
+        app: app(),
+        cache: app('cache'),
+        config: $config,
+        lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+        localCache: new HybridLocalCacheService(),
+    );
+
+    Cache::store('distributed-array')->put('hybrid-cache:single-swr', [
+        'value' => 'stale-value',
+        'fresh_until' => time() - 10,
+        'stale_until' => time() + 60,
+    ], 60);
+
+    $served = $manager->flexible('single-swr', 30, fn (): string => 'fresh-value', 30);
+    $next = $manager->flexible('single-swr', 30, fn (): string => 'newer-value', 30);
+
+    expect($served)->toBe('stale-value')
+        ->and($next)->toBe('fresh-value');
 });

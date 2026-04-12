@@ -14,6 +14,7 @@ use Illuminate\Contracts\Cache\Lock;
 use Illuminate\Contracts\Foundation\Application;
 use rajmundtoth0\HybridCache\Config\HybridCacheConfig;
 use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
+use rajmundtoth0\HybridCache\Services\HybridLocalCacheService;
 
 final class HybridCacheManager
 {
@@ -21,27 +22,24 @@ final class HybridCacheManager
     private const FOREVER_TTL = 315360000;
     private const DISTRIBUTED_RETRY_ATTEMPTS = 5;
     private const DISTRIBUTED_RETRY_DELAY_US = 50_000;
-    private const SLOT_A = 'a';
-    private const SLOT_B = 'b';
-
     public function __construct(
         private readonly Application $app,
         private readonly CacheManager $cache,
         private readonly HybridCacheConfig $config,
         private readonly HybridCacheLockService $lockService,
+        private readonly HybridLocalCacheService $localCache,
     ) {
     }
 
     public function get(string $key, mixed $default = null): mixed
     {
         $payloadKey = $this->payloadKey($key);
-        $localStore = $this->localStore();
-        $localHit = $this->fetchEnvelope($localStore, $payloadKey, ! $this->usesSingleStore());
+        $singleStore = $this->usesSingleStore();
+        $localHit = $this->localCache->readEnvelope($this->localStore(), $payloadKey, ! $singleStore);
         $envelope = $localHit['envelope'];
 
-        if ($envelope === null && ! $this->usesSingleStore()) {
-            $distributedHit = $this->fetchEnvelope($this->distributedStore(), $payloadKey, false);
-            $envelope = $distributedHit['envelope'];
+        if ($envelope === null && ! $singleStore) {
+            $envelope = $this->distributedEnvelope($payloadKey);
         }
 
         if ($envelope === null || $envelope->secondsUntilExpiry(time()) < 1) {
@@ -103,9 +101,10 @@ final class HybridCacheManager
         $payloadKey = $this->payloadKey($key);
         $lockKey = $this->lockService->lockKey($key);
         $now = time();
+        $singleStore = $this->usesSingleStore();
 
         $localStore = $this->localStore();
-        $localHit = $this->fetchEnvelope($localStore, $payloadKey, ! $this->usesSingleStore());
+        $localHit = $this->localCache->readEnvelope($localStore, $payloadKey, ! $singleStore);
         $localEnvelope = $localHit['envelope'];
         $localActiveSlot = $localHit['activeSlot'];
 
@@ -113,12 +112,11 @@ final class HybridCacheManager
             return $localEnvelope->value;
         }
 
-        if (! $this->usesSingleStore()) {
-            $distributedHit = $this->fetchEnvelope($this->distributedStore(), $payloadKey, false);
-            $distributedEnvelope = $distributedHit['envelope'];
+        if (! $singleStore) {
+            $distributedEnvelope = $this->distributedEnvelope($payloadKey);
 
             if ($distributedEnvelope !== null) {
-                $this->hydrateLocal($payloadKey, $distributedEnvelope, $now, $localActiveSlot);
+                $this->localCache->hydrateEnvelope($localStore, $payloadKey, $distributedEnvelope, $now, $localActiveSlot);
 
                 if ($distributedEnvelope->isFresh($now)) {
                     return $distributedEnvelope->value;
@@ -210,12 +208,7 @@ final class HybridCacheManager
             $inactiveSlot = null;
 
             if ($local !== null) {
-                $activeSlot = $this->readActiveSlot($local, $payloadKey) ?? self::SLOT_A;
-                $inactiveSlot = $this->inactiveSlot($activeSlot);
-                $inactiveKey = $this->slotKey($payloadKey, $inactiveSlot);
-
-                $local->put($inactiveKey, $envelope->toArray(), $ttlSeconds);
-                $this->setActiveSlot($local, $payloadKey, $inactiveSlot, $ttlSeconds);
+                $inactiveSlot = $this->localCache->persistRefreshedEnvelope($local, $payloadKey, $envelope, $ttlSeconds);
             }
 
             return RefreshResult::refreshed($key, $inactiveSlot);
@@ -313,13 +306,13 @@ final class HybridCacheManager
 
         $fromDistributed = $this->awaitDistributedPayload($payloadKey);
 
-        if ($fromDistributed['envelope'] === null) {
+        if ($fromDistributed === null) {
             return $this->storeFreshPayload($payloadKey, $callback, $freshTtl, $staleWindow);
         }
 
-        $this->hydrateLocal($payloadKey, $fromDistributed['envelope'], time(), $fromDistributed['activeSlot']);
+        $this->localCache->hydrateEnvelope($this->localStore(), $payloadKey, $fromDistributed, time(), null);
 
-        return $fromDistributed['envelope'];
+        return $fromDistributed;
     }
 
     private function storeFreshPayload(string $payloadKey, Closure $callback, int $freshTtl, int $staleWindow): CacheEnvelope
@@ -343,66 +336,24 @@ final class HybridCacheManager
             return $distributedWritten;
         }
 
-        $local = $this->localStore();
-        $activeSlot = $this->readActiveSlot($local, $payloadKey);
-        $targetKey = $activeSlot === null ? $payloadKey : $this->slotKey($payloadKey, $activeSlot);
-        $pointerWritten = true;
+        $localWritten = $this->localCache->persistEnvelope($this->localStore(), $payloadKey, $envelope, $ttl);
 
-        if ($activeSlot !== null) {
-            $pointerWritten = $this->setActiveSlot($local, $payloadKey, $activeSlot, $ttl);
-        } else {
-            $this->clearActiveSlot($local, $payloadKey);
-        }
-
-        $localWritten = $local->put($targetKey, $envelope->toArray(), $ttl);
-
-        return $distributedWritten && $pointerWritten && $localWritten;
+        return $distributedWritten && $localWritten;
     }
 
-    private function hydrateLocal(string $payloadKey, CacheEnvelope $envelope, int $now, ?string $activeSlot): void
-    {
-        if ($this->usesSingleStore()) {
-            return;
-        }
-
-        $ttl = $envelope->secondsUntilExpiry($now);
-
-        if ($ttl < 1) {
-            return;
-        }
-
-        $local = $this->localStore();
-        $targetKey = $payloadKey;
-
-        if ($activeSlot !== null) {
-            $this->setActiveSlot($local, $payloadKey, $activeSlot, $ttl);
-            $targetKey = $this->slotKey($payloadKey, $activeSlot);
-        } else {
-            $this->clearActiveSlot($local, $payloadKey);
-        }
-
-        $local->put($targetKey, $envelope->toArray(), $ttl);
-    }
-
-    /**
-     * @return array{envelope: ?CacheEnvelope, activeSlot: ?string}
-     */
-    private function awaitDistributedPayload(string $payloadKey): array
+    private function awaitDistributedPayload(string $payloadKey): ?CacheEnvelope
     {
         for ($attempt = 0; $attempt < self::DISTRIBUTED_RETRY_ATTEMPTS; $attempt++) {
             usleep(self::DISTRIBUTED_RETRY_DELAY_US);
 
-            $hit = $this->fetchEnvelope($this->distributedStore(), $payloadKey, false);
+            $hit = $this->distributedEnvelope($payloadKey);
 
-            if ($hit['envelope'] !== null) {
+            if ($hit !== null) {
                 return $hit;
             }
         }
 
-        return [
-            'envelope' => null,
-            'activeSlot' => null,
-        ];
+        return null;
     }
 
     public function prefix(): string
@@ -415,62 +366,9 @@ final class HybridCacheManager
         return $this->prefix().$key;
     }
 
-    private function activePointerKey(string $payloadKey): string
+    private function distributedEnvelope(string $payloadKey): ?CacheEnvelope
     {
-        return $payloadKey.':active';
-    }
-
-    private function slotKey(string $payloadKey, string $slot): string
-    {
-        return $payloadKey.':slot:'.$slot;
-    }
-
-    /**
-     * @return array{envelope: ?CacheEnvelope, activeSlot: ?string}
-     */
-    private function fetchEnvelope(Repository $store, string $payloadKey, bool $useActivePointer = true): array
-    {
-        $activeSlot = $useActivePointer ? $this->readActiveSlot($store, $payloadKey) : null;
-        $targetKey = $activeSlot === null ? $payloadKey : $this->slotKey($payloadKey, $activeSlot);
-
-        return [
-            'envelope' => CacheEnvelope::fromStored($store->get($targetKey)),
-            'activeSlot' => $activeSlot,
-        ];
-    }
-
-    private function readActiveSlot(Repository $store, string $payloadKey): ?string
-    {
-        $value = $store->get($this->activePointerKey($payloadKey));
-
-        if ($value === self::SLOT_A || $value === self::SLOT_B) {
-            return $value;
-        }
-
-        if ($value !== null) {
-            $store->forget($this->activePointerKey($payloadKey));
-        }
-
-        return null;
-    }
-
-    private function setActiveSlot(Repository $store, string $payloadKey, string $slot, int $ttl): bool
-    {
-        if ($slot !== self::SLOT_A && $slot !== self::SLOT_B) {
-            throw new \InvalidArgumentException('Invalid active slot.');
-        }
-
-        return $store->put($this->activePointerKey($payloadKey), $slot, $ttl);
-    }
-
-    private function clearActiveSlot(Repository $store, string $payloadKey): void
-    {
-        $store->forget($this->activePointerKey($payloadKey));
-    }
-
-    private function inactiveSlot(string $activeSlot): string
-    {
-        return $activeSlot === self::SLOT_A ? self::SLOT_B : self::SLOT_A;
+        return CacheEnvelope::fromStored($this->distributedStore()->get($payloadKey));
     }
 
     private function groupVersionKey(string $group): string

@@ -7,6 +7,7 @@ use rajmundtoth0\HybridCache\HybridCacheManager;
 use rajmundtoth0\HybridCache\HybridCacheStore;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
 use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
+use rajmundtoth0\HybridCache\Services\HybridLocalCacheService;
 use rajmundtoth0\HybridCache\Tests\Support\FailingStore;
 
 enum BackedKey: string
@@ -74,6 +75,7 @@ it('returns false from putMany when any write fails', function (): void {
         cache: app('cache'),
         config: $config,
         lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+        localCache: new HybridLocalCacheService(),
     );
     $store = new HybridCacheStore($manager);
 

@@ -13,12 +13,15 @@ use rajmundtoth0\HybridCache\Http\HybridCacheRefreshController;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
 use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
 use rajmundtoth0\HybridCache\Services\HybridCacheRefresherService;
+use rajmundtoth0\HybridCache\Services\HybridLocalCacheService;
 
 final class HybridCacheServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/hybrid-cache.php', 'hybrid-cache');
+
+        $this->app->singleton(HybridLocalCacheService::class, static fn (): HybridLocalCacheService => new HybridLocalCacheService());
 
         $this->app->singleton(HybridCacheManager::class, function (Application $app): HybridCacheManager {
             $configService = $app->make(HybridCacheConfigService::class);
@@ -32,6 +35,7 @@ final class HybridCacheServiceProvider extends ServiceProvider
                     cache: $app->make('cache'),
                     config: $config,
                 ),
+                localCache: $app->make(HybridLocalCacheService::class),
             );
         });
 
@@ -58,6 +62,7 @@ final class HybridCacheServiceProvider extends ServiceProvider
                         cache: $app->make('cache'),
                         config: $hybridConfig,
                     ),
+                    localCache: $app->make(HybridLocalCacheService::class),
                 );
 
                 return new HybridCacheRepository($manager, new HybridCacheStore($manager));
