@@ -1,8 +1,13 @@
 # Hybrid Cache
 
-[![CI](https://github.com/rajmundtoth0/hybrid-cache/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/rajmundtoth0/hybrid-cache/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](https://github.com/rajmundtoth0/hybrid-cache/actions/workflows/ci.yml)
-[![PHP](https://img.shields.io/badge/PHP-8.2%2B-777bb4)](https://www.php.net/)
+[![Version](https://poser.pugx.org/rajmundtoth0/hybrid-cache/version)](https://packagist.org/packages/rajmundtoth0/hybrid-cache)
+[![codecov](https://codecov.io/gh/rajmundtoth0/hybrid-cache/graph/badge.svg)](https://codecov.io/gh/rajmundtoth0/hybrid-cache)
+![PHPStan](https://img.shields.io/badge/PHPStan-Level_MAX-brightgreen)
+[![Build](https://github.com/rajmundtoth0/hybrid-cache/actions/workflows/ci.yml/badge.svg)](https://github.com/rajmundtoth0/hybrid-cache/actions/workflows/ci.yml)
+[![PHP Version Require](https://poser.pugx.org/rajmundtoth0/hybrid-cache/require/php)](https://packagist.org/packages/rajmundtoth0/hybrid-cache)
+[![License](https://poser.pugx.org/rajmundtoth0/hybrid-cache/license)](https://packagist.org/packages/rajmundtoth0/hybrid-cache)
+[![Total Downloads](https://poser.pugx.org/rajmundtoth0/hybrid-cache/downloads)](https://packagist.org/packages/rajmundtoth0/hybrid-cache)
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/rajmundtoth0/hybrid-cache.svg)](https://packagist.org/packages/rajmundtoth0/hybrid-cache)
 
 Hybrid Cache is a Laravel 12+ package for application-level caching with a simple default path:
 
