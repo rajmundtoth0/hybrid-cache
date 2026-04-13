@@ -35,7 +35,7 @@ final readonly class CacheEnvelope
         $freshUntil = $payload['fresh_until'] ?? null;
         $staleUntil = $payload['stale_until'] ?? null;
 
-        if (! is_int($freshUntil) || ! is_int($staleUntil) || $staleUntil < time()) {
+        if (! is_int($freshUntil) || ! is_int($staleUntil) || $staleUntil <= time()) {
             return null;
         }
 

@@ -333,6 +333,7 @@ When `local_store` and `distributed_store` name the same cache driver, the packa
 ## Testing and quality tools
 
 - Tests: Pest
+- Mutation testing: Pest `--mutate`
 - CI: GitHub Actions runs tests on PHP 8.2, 8.3, and 8.4, plus a dedicated Xdebug coverage job
 - Static analysis: PHPStan at max level via Larastan
 - Static policy checks: `rajmundtoth0/phpstan-forbidden` to ban debugging and output constructs in package source
@@ -343,18 +344,23 @@ Available commands:
 ```bash
 composer test
 composer test-coverage
+composer mutate
+composer mutate-bail
 composer analyse
 composer format
 composer quality
 ```
 
-Coverage uses Xdebug:
+Coverage and mutation testing use Xdebug:
 
 ```bash
 XDEBUG_MODE=coverage composer test-coverage
+XDEBUG_MODE=coverage composer mutate
 ```
 
 The Clover report is written to `build/coverage/clover.xml`.
+
+Mutation testing currently runs Pest in `--everything --covered-only` mode because the suite does not yet annotate tests with `covers()` or `mutates()`. Adding those annotations later will make mutation runs narrower and faster.
 
 There is also a small `Makefile` for the demo workflow:
 
