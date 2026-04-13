@@ -8,6 +8,7 @@ use rajmundtoth0\HybridCache\HybridCacheManager;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
 use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
 use rajmundtoth0\HybridCache\Services\HybridLocalCacheService;
+use rajmundtoth0\HybridCache\Tests\Support\FailingStore;
 use rajmundtoth0\HybridCache\Tests\Support\NoLockStore;
 
 it('uses the default store ttl for invalid values', function (): void {
@@ -104,6 +105,27 @@ it('supports single-store operation', function (): void {
     $manager->put('single', 'value', 60);
 
     expect($manager->get('single'))->toBe('value');
+});
+
+it('keeps distributed payloads readable when local writes fail', function (): void {
+    Cache::extend('failing-local', fn ($app, array $config) => $app['cache']->repository(new FailingStore(), $config));
+    config()->set('cache.stores.failing-local', ['driver' => 'failing-local']);
+
+    $config = app(HybridCacheConfigService::class)->make([
+        'local_store' => 'failing-local',
+        'distributed_store' => 'distributed-array',
+    ]);
+    $manager = new HybridCacheManager(
+        app: app(),
+        cache: app('cache'),
+        config: $config,
+        lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+        localCache: new HybridLocalCacheService(),
+    );
+
+    expect($manager->put('distributed-source-of-truth', 'value', 60))->toBeFalse()
+        ->and(Cache::store('distributed-array')->get('hybrid-cache:distributed-source-of-truth'))->toBeArray()
+        ->and($manager->get('distributed-source-of-truth'))->toBe('value');
 });
 
 it('flushes correctly when using a single store', function (): void {

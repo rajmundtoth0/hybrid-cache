@@ -25,6 +25,25 @@ it('skips hydration when the envelope is already expired', function (): void {
         ->and(Cache::store('local-array')->get($payloadKey))->toBeNull();
 });
 
+it('hydrates fresh envelopes without changing timestamps', function (): void {
+    $service = new HybridLocalCacheService();
+    $payloadKey = 'hybrid-cache:hydrate-fresh-timestamps';
+    $now = time();
+    $envelope = new CacheEnvelope(
+        value: 'fresh-value',
+        freshUntil: $now + 30,
+        staleUntil: $now + 90,
+    );
+
+    expect($service->hydrateEnvelope(Cache::store('local-array'), $payloadKey, $envelope, $now, null))->toBeTrue();
+
+    expect(Cache::store('local-array')->get($payloadKey))->toBe([
+        'value' => 'fresh-value',
+        'fresh_until' => $now + 30,
+        'stale_until' => $now + 90,
+    ]);
+});
+
 it('persists local payloads to the active slot when a pointer exists', function (): void {
     $service = new HybridLocalCacheService();
     $payloadKey = 'hybrid-cache:pointer-write';
@@ -107,6 +126,6 @@ it('hydrating a stale envelope preserves its stale semantics in local storage', 
 
     expect($stored)->toBeArray()
         ->and($stored['value'])->toBe('stale-value')
-        ->and($stored['fresh_until'])->toBeLessThan($now)  // still marked stale
-        ->and($stored['stale_until'])->toBeGreaterThan($now); // still within serveable window
+        ->and($stored['fresh_until'])->toBe($now - 10)
+        ->and($stored['stale_until'])->toBe($now + 50);
 });

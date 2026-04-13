@@ -139,7 +139,7 @@ final class HybridCacheManager
                 }
 
                 if ($distributedEnvelope->isStale($now)) {
-                    $this->refreshStale($payloadKey, $lockKey, $callback, $freshTtl, $staleWindow);
+                    $this->refreshStale($payloadKey, $lockKey, $callback, $freshTtl, $staleWindow, $localActiveSlot);
 
                     return $distributedEnvelope->value;
                 }
@@ -147,7 +147,7 @@ final class HybridCacheManager
         }
 
         if ($localEnvelope?->isStale($now)) {
-            $this->refreshStale($payloadKey, $lockKey, $callback, $freshTtl, $staleWindow);
+            $this->refreshStale($payloadKey, $lockKey, $callback, $freshTtl, $staleWindow, $localActiveSlot);
 
             return $localEnvelope->value;
         }
@@ -275,9 +275,10 @@ final class HybridCacheManager
         Closure $callback,
         int $freshTtl,
         int $staleWindow,
+        ?string $activeSlot = null,
     ): void {
-        $refresh = function () use ($payloadKey, $lockKey, $callback, $freshTtl, $staleWindow): void {
-            $this->refreshIfLockIsAvailable($payloadKey, $lockKey, $callback, $freshTtl, $staleWindow);
+        $refresh = function () use ($payloadKey, $lockKey, $callback, $freshTtl, $staleWindow, $activeSlot): void {
+            $this->refreshIfLockIsAvailable($payloadKey, $lockKey, $callback, $freshTtl, $staleWindow, $activeSlot);
         };
 
         if (! $this->app->runningInConsole()) {
@@ -295,8 +296,24 @@ final class HybridCacheManager
         Closure $callback,
         int $freshTtl,
         int $staleWindow,
+        ?string $activeSlot = null,
     ): ?CacheEnvelope {
-        $storeFresh = fn (): CacheEnvelope => $this->storeFreshPayload($payloadKey, $callback, $freshTtl, $staleWindow);
+        $storeFresh = function () use ($payloadKey, $callback, $freshTtl, $staleWindow, $activeSlot): CacheEnvelope {
+            $now = time();
+            $current = $this->distributedEnvelope($payloadKey);
+
+            // A deferred stale refresh must not clobber a payload another worker has
+            // already refreshed and committed while this callback was queued.
+            if ($current?->isFresh($now)) {
+                if (! $this->usesSingleStore()) {
+                    $this->localCache->hydrateEnvelope($this->localStore(), $payloadKey, $current, $now, $activeSlot);
+                }
+
+                return $current;
+            }
+
+            return $this->storeFreshPayload($payloadKey, $callback, $freshTtl, $staleWindow);
+        };
 
         return $this->lockService->withRefreshLock(
             lockKey: $lockKey,
