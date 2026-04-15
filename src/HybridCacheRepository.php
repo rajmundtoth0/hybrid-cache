@@ -34,6 +34,8 @@ final class HybridCacheRepository extends Repository
             ttl: $freshSeconds,
             callback: $callback,
             staleTtl: max(0, $staleSeconds - $freshSeconds),
+            lock: is_array($lock) ? $lock : null,
+            alwaysDefer: (bool) $alwaysDefer,
         );
     }
 

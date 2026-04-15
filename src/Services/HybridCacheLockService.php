@@ -32,14 +32,14 @@ final class HybridCacheLockService
      *
      * @return (Closure(): bool)|null
      */
-    public function acquireRefreshLock(string $lockKey): ?Closure
+    public function acquireRefreshLock(string $lockKey, ?int $seconds = null, string|int|null $owner = null): ?Closure
     {
         $store = $this->distributedStore();
         $backend = $store->getStore();
-        $lockTtl = $this->lockTtl();
+        $lockTtl = $seconds ?? $this->lockTtl();
 
         if ($backend instanceof LockProvider) {
-            $lock = $backend->lock($lockKey, $lockTtl);
+            $lock = $backend->lock($lockKey, $lockTtl, $owner === null ? null : (string) $owner);
 
             if (! $lock->get()) {
                 return null;
@@ -61,9 +61,13 @@ final class HybridCacheLockService
      *
      * @param Closure(): CacheEnvelope $onAcquired
      */
-    public function withRefreshLock(string $lockKey, Closure $onAcquired): ?CacheEnvelope
-    {
-        $release = $this->acquireRefreshLock($lockKey);
+    public function withRefreshLock(
+        string $lockKey,
+        Closure $onAcquired,
+        ?int $seconds = null,
+        string|int|null $owner = null,
+    ): ?CacheEnvelope {
+        $release = $this->acquireRefreshLock($lockKey, $seconds, $owner);
 
         if ($release === null) {
             return null;
@@ -95,7 +99,7 @@ final class HybridCacheLockService
 
         $lockKey = $this->lockKey($name);
 
-        return ! $owner
+        return $owner === null
             ? $backend->lock($lockKey, $seconds)
             : $backend->restoreLock($lockKey, (string) $owner);
     }

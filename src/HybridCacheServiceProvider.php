@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace rajmundtoth0\HybridCache;
 
+use Closure;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
@@ -20,7 +21,7 @@ final class HybridCacheServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__.'/../config/hybrid-cache.php', 'hybrid-cache');
-        $buildManager = fn (Application $app, array $storeConfig = []): HybridCacheManager => $this->buildManager($app, $storeConfig);
+        $buildManager = $this->buildManagerFactory();
 
         $this->app->singleton(HybridLocalCacheService::class, static fn (): HybridLocalCacheService => new HybridLocalCacheService());
 
@@ -119,6 +120,17 @@ final class HybridCacheServiceProvider extends ServiceProvider
         $path = $this->app->make('config')->get('hybrid-cache.refresh.http.path', '/hybrid-cache/refresh');
 
         return is_string($path) && $path !== '' ? $path : '/hybrid-cache/refresh';
+    }
+
+    /**
+     * @return Closure(Application, array<string, mixed>=): HybridCacheManager
+     */
+    private function buildManagerFactory(): Closure
+    {
+        return function (Application $app, array $storeConfig = []): HybridCacheManager {
+            /** @var array<string, mixed> $storeConfig */
+            return $this->buildManager($app, $storeConfig);
+        };
     }
 
     /**

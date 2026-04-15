@@ -26,6 +26,7 @@ it('refreshes a key over the signed endpoint', function (): void {
             'handler' => fn (): string => 'value',
             'ttl' => 60,
             'stale_ttl' => 0,
+            'coordinated' => true,
         ],
     ]);
 

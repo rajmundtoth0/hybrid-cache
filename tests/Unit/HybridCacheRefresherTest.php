@@ -17,6 +17,7 @@ it('resolves the longest matching prefix', function (): void {
             'handler' => fn (string $key): string => 'long-'.$key,
             'ttl' => 60,
             'stale_ttl' => 0,
+            'coordinated' => true,
         ],
     ]);
 

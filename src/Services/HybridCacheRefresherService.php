@@ -12,7 +12,7 @@ use Illuminate\Contracts\Foundation\Application;
 use rajmundtoth0\HybridCache\HybridCacheManager;
 use rajmundtoth0\HybridCache\RefreshResult;
 use rajmundtoth0\HybridCache\Enum\StatusEnum;
-use rajmundtoth0\HybridCache\Request\HybridCacheResfreshRequest;
+use rajmundtoth0\HybridCache\Request\HybridCacheRefreshRequest;
 
 final class HybridCacheRefresherService
 {
@@ -89,14 +89,32 @@ final class HybridCacheRefresherService
         return $result;
     }
 
-    public function refreshRequest(HybridCacheResfreshRequest $request): RefreshResult
+    /**
+     * Programmatic refresh entry point for application code.
+     * Provide exactly one of: $key, $prefix, $group.
+     */
+    public function refresh(?string $key = null, ?string $prefix = null, ?string $group = null, bool $refreshKeys = false): RefreshResult
     {
         $targets = array_filter(
-            [$request->key, $request->prefix, $request->group],
+            [$key, $prefix, $group],
             static fn ($value): bool => is_string($value) && $value !== ''
         );
 
         if (count($targets) !== 1) {
+            return RefreshResult::invalid('Provide exactly one of: key, prefix, group.');
+        }
+
+        return $this->dispatchRefresh($key, $prefix, $group, $refreshKeys);
+    }
+
+    /**
+     * HTTP adapter for validated refresh requests.
+     */
+    public function refreshHttpRequest(HybridCacheRefreshRequest $request): RefreshResult
+    {
+        $result = $this->refresh($request->key, $request->prefix, $request->group, $request->shouldRefreshKeys);
+
+        if ($result->status === StatusEnum::INVALID->value) {
             logger()->warning('Hybrid cache refresh request rejected (invalid payload).', [
                 'key' => $request->key,
                 'prefix' => $request->prefix,
@@ -104,15 +122,7 @@ final class HybridCacheRefresherService
                 'ip' => $request->ip(),
             ]);
 
-            return RefreshResult::invalid('Provide exactly one of: key, prefix, group.');
-        }
-
-        if ($request->key !== null) {
-            $result = $this->refreshKey($request->key);
-        } elseif ($request->prefix !== null) {
-            $result = $this->refreshPrefix($request->prefix, $request->shouldRefreshKeys);
-        } else {
-            $result = $this->refreshGroup($request->group ?? '', $request->shouldRefreshKeys);
+            return $result;
         }
 
         logger()->info('Hybrid cache refresh request.', [
@@ -126,6 +136,9 @@ final class HybridCacheRefresherService
         return $result;
     }
 
+    /**
+     * CLI adapter for `hybrid-cache:refresh`.
+     */
     public function refreshCommand(?string $key, ?string $prefix, ?string $group, bool $refreshKeys): RefreshResult
     {
         $targets = array_filter([$key, $prefix, $group], fn ($value): bool => $value !== null);
@@ -134,13 +147,7 @@ final class HybridCacheRefresherService
             return RefreshResult::invalid('Provide exactly one of: key, --prefix, --group.');
         }
 
-        if ($key !== null) {
-            $result = $this->refreshKey($key);
-        } elseif ($prefix !== null) {
-            $result = $this->refreshPrefix($prefix, $refreshKeys);
-        } else {
-            $result = $this->refreshGroup($group ?? '', $refreshKeys);
-        }
+        $result = $this->dispatchRefresh($key, $prefix, $group, $refreshKeys);
 
         logger()->info('Hybrid cache refresh command.', [
             'key' => $key,
@@ -150,6 +157,19 @@ final class HybridCacheRefresherService
         ]);
 
         return $result;
+    }
+
+    private function dispatchRefresh(?string $key, ?string $prefix, ?string $group, bool $refreshKeys): RefreshResult
+    {
+        if (is_string($key) && $key !== '') {
+            return $this->refreshKey($key);
+        }
+
+        if (is_string($prefix) && $prefix !== '') {
+            return $this->refreshPrefix($prefix, $refreshKeys);
+        }
+
+        return $this->refreshGroup((string) $group, $refreshKeys);
     }
 
     /**
@@ -194,7 +214,7 @@ final class HybridCacheRefresherService
         $ttl = $this->normalizeTtl($definition['ttl'] ?? $this->defaultTtl(), 'ttl', $key);
         $staleTtl = $this->normalizeOptionalTtl($definition['stale_ttl'] ?? null, 'stale_ttl', $key);
 
-        return $this->manager->coordinatedRefresh(
+        return $this->manager->refreshPayload(
             key: $key,
             builder: $builder,
             ttl: $ttl,

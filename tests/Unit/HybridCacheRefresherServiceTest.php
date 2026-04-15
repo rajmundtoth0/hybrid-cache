@@ -2,35 +2,25 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use rajmundtoth0\HybridCache\Enum\StatusEnum;
-use rajmundtoth0\HybridCache\Request\HybridCacheResfreshRequest;
+use rajmundtoth0\HybridCache\Request\HybridCacheRefreshRequest;
 use rajmundtoth0\HybridCache\Services\HybridCacheRefresherService;
 
-it('rejects refresh requests without a target', function (): void {
-    $request = new HybridCacheResfreshRequest();
-    $request->key = null;
-    $request->prefix = null;
-    $request->group = null;
-    $request->shouldRefreshKeys = false;
-
-    $result = app(HybridCacheRefresherService::class)->refreshRequest($request);
+it('rejects programmatic refreshes without a target', function (): void {
+    $result = app(HybridCacheRefresherService::class)->refresh();
 
     expect($result->status)->toBe(StatusEnum::INVALID->value);
 });
 
-it('rejects refresh requests with multiple targets', function (): void {
-    $request = new HybridCacheResfreshRequest();
-    $request->key = 'one';
-    $request->prefix = 'two';
-    $request->group = null;
-    $request->shouldRefreshKeys = false;
-
-    $result = app(HybridCacheRefresherService::class)->refreshRequest($request);
+it('rejects programmatic refreshes with multiple targets', function (): void {
+    $result = app(HybridCacheRefresherService::class)->refresh(key: 'one', prefix: 'two');
 
     expect($result->status)->toBe(StatusEnum::INVALID->value);
 });
 
-it('refreshes a key from a programmatic request', function (): void {
+it('refreshes a key programmatically', function (): void {
     config()->set('hybrid-cache.refresh.keys', [
         'programmatic:key' => [
             'handler' => fn (): string => 'value',
@@ -39,18 +29,31 @@ it('refreshes a key from a programmatic request', function (): void {
         ],
     ]);
 
-    $request = new HybridCacheResfreshRequest();
-    $request->key = 'programmatic:key';
-    $request->prefix = null;
-    $request->group = null;
-    $request->shouldRefreshKeys = false;
+    $result = app(HybridCacheRefresherService::class)->refresh(key: 'programmatic:key');
 
-    $result = app(HybridCacheRefresherService::class)->refreshRequest($request);
-
-    expect($result->status)->toBe(StatusEnum::REFRESHED->value);
+    expect($result->status)->toBe(StatusEnum::REFRESHED->value)
+        ->and(Cache::store('local-array')->get('hybrid-cache:programmatic:key'))->toBeArray()
+        ->and(Cache::store('local-array')->get('hybrid-cache:programmatic:key:active'))->toBeNull();
 });
 
-it('refreshes a prefix from a programmatic request', function (): void {
+it('uses the coordinated local path only for definitions marked as coordinated', function (): void {
+    config()->set('hybrid-cache.refresh.keys', [
+        'programmatic:coordinated' => [
+            'handler' => fn (): string => 'value',
+            'ttl' => 60,
+            'stale_ttl' => 0,
+            'coordinated' => true,
+        ],
+    ]);
+
+    $result = app(HybridCacheRefresherService::class)->refresh(key: 'programmatic:coordinated');
+
+    expect($result->status)->toBe(StatusEnum::REFRESHED->value)
+        ->and(Cache::store('local-array')->get('hybrid-cache:programmatic:coordinated:active'))->toBe('b')
+        ->and(Cache::store('local-array')->get('hybrid-cache:programmatic:coordinated:slot:b'))->toBeArray();
+});
+
+it('refreshes a prefix programmatically', function (): void {
     config()->set('hybrid-cache.refresh.prefixes', [
         'prefix:' => [
             'group' => 'prefix-group',
@@ -62,33 +65,36 @@ it('refreshes a prefix from a programmatic request', function (): void {
         ],
     ]);
 
-    $request = new HybridCacheResfreshRequest();
-    $request->key = null;
-    $request->prefix = 'prefix:';
-    $request->group = null;
-    $request->shouldRefreshKeys = false;
-
-    $result = app(HybridCacheRefresherService::class)->refreshRequest($request);
+    $result = app(HybridCacheRefresherService::class)->refresh(prefix: 'prefix:');
 
     expect($result->status)->toBe(StatusEnum::REFRESHED->value);
 });
 
-it('refreshes a group from a programmatic request', function (): void {
+it('refreshes a group programmatically', function (): void {
     config()->set('hybrid-cache.refresh.groups', [
         'team' => [
             'keys' => ['group:key'],
         ],
     ]);
 
-    $request = new HybridCacheResfreshRequest();
-    $request->key = null;
-    $request->prefix = null;
-    $request->group = 'team';
-    $request->shouldRefreshKeys = false;
-
-    $result = app(HybridCacheRefresherService::class)->refreshRequest($request);
+    $result = app(HybridCacheRefresherService::class)->refresh(group: 'team');
 
     expect($result->status)->toBe(StatusEnum::REFRESHED->value);
+});
+
+it('logs invalid http refreshes as warnings without an info log', function (): void {
+    Log::spy();
+
+    $request = new HybridCacheRefreshRequest();
+    $request->key = 'one';
+    $request->group = 'two';
+
+    $result = app(HybridCacheRefresherService::class)->refreshHttpRequest($request);
+
+    expect($result->status)->toBe(StatusEnum::INVALID->value);
+
+    Log::shouldHaveReceived('warning')->once();
+    Log::shouldNotHaveReceived('info');
 });
 
 it('reports missing keys for prefixes when refreshing keys is requested', function (): void {

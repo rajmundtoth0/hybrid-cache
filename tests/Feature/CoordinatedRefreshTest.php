@@ -13,6 +13,22 @@ use rajmundtoth0\HybridCache\Tests\Support\FailingStore;
 use rajmundtoth0\HybridCache\Tests\Support\NoLockStore;
 use rajmundtoth0\HybridCache\Tests\Support\ThrowingIncrementStore;
 
+beforeEach(function (): void {
+    config()->set('hybrid-cache.refresh.keys', [
+        'slot-key' => ['coordinated' => true],
+        'fail-key' => ['coordinated' => true],
+        'busy' => ['coordinated' => true],
+        'pointer-key' => ['coordinated' => true],
+        'clear-pointer' => ['coordinated' => true],
+        'hydrate-key' => ['coordinated' => true],
+        'invalid-pointer' => ['coordinated' => true],
+        'slot-prefer' => ['coordinated' => true],
+        'missing-slot' => ['coordinated' => true],
+        'write-fail' => ['coordinated' => true],
+        'nolock-key' => ['coordinated' => true],
+    ]);
+});
+
 it('writes to the inactive slot and flips the pointer', function (): void {
     $manager = app(HybridCacheManager::class);
 
@@ -59,6 +75,15 @@ it('returns already refreshing when lock is held', function (): void {
     $lock->release();
 
     expect($result->status)->toBe(StatusEnum::ALREADY_REFRESHING->value);
+});
+
+it('rejects coordinated refreshes for keys that are not configured as coordinated', function (): void {
+    $manager = app(HybridCacheManager::class);
+
+    $result = $manager->coordinatedRefresh('plain-key', fn (): string => 'value', 60, 0);
+
+    expect($result->status)->toBe(StatusEnum::INVALID->value)
+        ->and($result->message)->toContain('not configured for coordinated refresh');
 });
 
 it('writes to the active slot when a pointer exists', function (): void {

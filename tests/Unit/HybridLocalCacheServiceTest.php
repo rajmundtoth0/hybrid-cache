@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Cache\Repository;
 use rajmundtoth0\HybridCache\CacheEnvelope;
 use rajmundtoth0\HybridCache\Services\HybridLocalCacheService;
+use rajmundtoth0\HybridCache\Tests\Support\RecordingArrayStore;
 
 it('rejects invalid active slots', function (): void {
     $service = new HybridLocalCacheService();
@@ -81,6 +83,21 @@ it('cleans invalid pointers and falls back to the base key', function (): void {
         ->and(Cache::store('local-array')->get($payloadKey.':active'))->toBeNull();
 });
 
+it('reads the base key directly for non-coordinated payloads', function (): void {
+    $service = new HybridLocalCacheService();
+    $payloadKey = 'hybrid-cache:base-only-read';
+
+    Cache::store('local-array')->put($payloadKey.':active', 'invalid', 60);
+    Cache::store('local-array')->put($payloadKey, CacheEnvelope::fresh('base', 60, 0, time())->toArray(), 60);
+
+    $activeSlot = 'seed';
+    $envelope = $service->readEnvelope(Cache::store('local-array'), $payloadKey, false, $activeSlot);
+
+    expect($envelope?->value)->toBe('base')
+        ->and($activeSlot)->toBeNull()
+        ->and(Cache::store('local-array')->get($payloadKey.':active'))->toBe('invalid');
+});
+
 it('writes coordinated refreshes to the inactive slot and flips the pointer', function (): void {
     $service = new HybridLocalCacheService();
     $payloadKey = 'hybrid-cache:refresh-slot';
@@ -93,6 +110,27 @@ it('writes coordinated refreshes to the inactive slot and flips the pointer', fu
     expect($slot)->toBe('b')
         ->and(Cache::store('local-array')->get($payloadKey.':active'))->toBe('b')
         ->and(Cache::store('local-array')->get($payloadKey.':slot:b'))->toBeArray();
+});
+
+it('writes the inactive slot before flipping the active pointer', function (): void {
+    $service = new HybridLocalCacheService();
+    $backend = new RecordingArrayStore(true);
+    $store = new Repository($backend);
+    $payloadKey = 'hybrid-cache:ordered-refresh-slot';
+    $envelope = CacheEnvelope::fresh('value', 60, 0, time());
+
+    $store->put($payloadKey.':active', 'a', 60);
+    $backend->writes = [];
+
+    $slot = $service->persistRefreshedEnvelope($store, $payloadKey, $envelope, 60);
+
+    expect($slot)->toBe('b')
+        ->and($backend->writes)->toBe([
+            $payloadKey.':slot:b',
+            $payloadKey.':active',
+        ])
+        ->and($store->get($payloadKey.':active'))->toBe('b')
+        ->and($store->get($payloadKey.':slot:b'))->toBeArray();
 });
 
 it('defaults to slot b when no prior pointer exists during a coordinated refresh', function (): void {

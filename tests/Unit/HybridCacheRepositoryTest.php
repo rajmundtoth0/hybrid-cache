@@ -3,6 +3,13 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Cache;
+use rajmundtoth0\HybridCache\HybridCacheManager;
+use rajmundtoth0\HybridCache\HybridCacheRepository;
+use rajmundtoth0\HybridCache\HybridCacheStore;
+use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
+use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
+use rajmundtoth0\HybridCache\Services\HybridLocalCacheService;
+use rajmundtoth0\HybridCache\Tests\Support\RecordingLockStore;
 
 enum RepoKey: string
 {
@@ -80,4 +87,75 @@ it('rejects unsupported ttl values through the private ttl guard', function (): 
 
     expect(fn () => $method->invoke($store, 'bad'))
         ->toThrow(\InvalidArgumentException::class);
+});
+
+it('forwards always-defer requests from the repository API', function (): void {
+    /** @var HybridCacheRepository $store */
+    $store = Cache::store('hybrid');
+    $payloadKey = 'hybrid-cache:repo-deferred';
+    $calls = 0;
+
+    Cache::store('distributed-array')->put($payloadKey, [
+        'value' => 'stale',
+        'fresh_until' => time() - 10,
+        'stale_until' => time() + 60,
+    ], 60);
+
+    $value = $store->flexible('repo-deferred', [30, 90], function () use (&$calls): string {
+        $calls++;
+
+        return 'fresh';
+    }, null, true);
+
+    expect($value)->toBe('stale')
+        ->and($calls)->toBe(0);
+
+    app()->terminate();
+
+    $next = $store->flexible('repo-deferred', [30, 90], function () use (&$calls): string {
+        $calls++;
+
+        return 'fresh-again';
+    });
+
+    expect($next)->toBe('fresh')
+        ->and($calls)->toBe(1);
+});
+
+it('forwards lock options from the repository API', function (): void {
+    $recordingStore = new RecordingLockStore(true);
+
+    Cache::extend('recording-lock-driver', fn ($app, array $config) => $app['cache']->repository($recordingStore, $config));
+    config()->set('cache.stores.recording-lock', ['driver' => 'recording-lock-driver']);
+
+    $config = app(HybridCacheConfigService::class)->make([
+        'local_store' => 'local-array',
+        'distributed_store' => 'recording-lock',
+    ]);
+    $manager = new HybridCacheManager(
+        app: app(),
+        cache: app('cache'),
+        config: $config,
+        lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+        localCache: new HybridLocalCacheService(),
+    );
+    $store = new HybridCacheRepository($manager, new HybridCacheStore($manager));
+    $payloadKey = 'hybrid-cache:repo-lock';
+
+    Cache::store('recording-lock')->put($payloadKey, [
+        'value' => 'stale',
+        'fresh_until' => time() - 10,
+        'stale_until' => time() + 60,
+    ], 60);
+
+    expect($store->flexible('repo-lock', [30, 90], fn (): string => 'fresh', [
+        'seconds' => 7,
+        'owner' => 'repo-owner',
+    ]))->toBe('stale')
+        ->and($recordingStore->lockCalls)->toHaveCount(1)
+        ->and($recordingStore->lockCalls[0])->toMatchArray([
+            'name' => 'hybrid-cache:lock:repo-lock',
+            'seconds' => 7,
+            'owner' => 'repo-owner',
+        ]);
 });

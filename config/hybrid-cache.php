@@ -27,6 +27,8 @@ return [
 
         /**
          * Keys that can be refreshed via HTTP/CLI.
+         * Add 'coordinated' => true only when the key should use the local
+         * active-slot pointer path; ordinary TTL/SWR keys stay on the base-key path.
          *
          * Example:
          * 'keys' => [
@@ -35,6 +37,7 @@ return [
          *         'ttl' => 300,
          *         'stale_ttl' => 60,
          *         'group' => 'dashboard',
+         *         'coordinated' => true,
          *     ],
          * ],
          */
@@ -42,6 +45,8 @@ return [
 
         /**
          * Prefix refreshers. Used when a key does not have an exact match.
+         * Add 'coordinated' => true only when matching keys should use the
+         * local active-slot pointer path.
          *
          * Example:
          * 'prefixes' => [
@@ -51,6 +56,7 @@ return [
          *         'stale_ttl' => 60,
          *         'group' => 'users',
          *         'keys' => ['users:index'],
+         *         'coordinated' => true,
          *     ],
          * ],
          */

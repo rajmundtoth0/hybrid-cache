@@ -142,6 +142,28 @@ it('forgets both cache layers', function (): void {
         ->and(Cache::store('local-array')->get('hybrid-cache:forget-me'))->toBeNull();
 });
 
+it('forgets active pointers and slot payloads after a coordinated refresh', function (): void {
+    config()->set('hybrid-cache.refresh.keys', [
+        'forget-slot' => ['coordinated' => true],
+    ]);
+
+    $manager = app(HybridCacheManager::class);
+    $payloadKey = 'hybrid-cache:forget-slot';
+
+    $manager->coordinatedRefresh('forget-slot', fn (): string => 'value', 60, 0);
+
+    expect(Cache::store('local-array')->get($payloadKey.':active'))->toBe('b')
+        ->and(Cache::store('local-array')->get($payloadKey.':slot:b'))->toBeArray();
+
+    expect($manager->forget('forget-slot'))->toBeTrue()
+        ->and(Cache::store('distributed-array')->get($payloadKey))->toBeNull()
+        ->and(Cache::store('local-array')->get($payloadKey))->toBeNull()
+        ->and(Cache::store('local-array')->get($payloadKey.':active'))->toBeNull()
+        ->and(Cache::store('local-array')->get($payloadKey.':slot:a'))->toBeNull()
+        ->and(Cache::store('local-array')->get($payloadKey.':slot:b'))->toBeNull()
+        ->and($manager->get('forget-slot'))->toBeNull();
+});
+
 it('respects store-level overrides for prefix and stale ttl', function (): void {
     config()->set('cache.stores.hybrid-overrides', [
         'driver' => 'hybrid',
@@ -180,7 +202,7 @@ it('throws for invalid flexible ttl input', function (): void {
         ->toThrow(\InvalidArgumentException::class);
 });
 
-it('simple reads do not require pointer state', function (): void {
+it('simple reads ignore pointer state on the base-key path', function (): void {
     Cache::store('local-array')->put('hybrid-cache:simple-read:active', 'invalid', 60);
     Cache::store('distributed-array')->put('hybrid-cache:simple-read', [
         'value' => 'distributed-value',
@@ -196,7 +218,7 @@ it('simple reads do not require pointer state', function (): void {
 
     expect($value)->toBe('distributed-value')
         ->and(Cache::store('local-array')->get('hybrid-cache:simple-read'))->toBeArray()
-        ->and(Cache::store('local-array')->get('hybrid-cache:simple-read:active'))->toBeNull();
+        ->and(Cache::store('local-array')->get('hybrid-cache:simple-read:active'))->toBe('invalid');
 });
 
 it('single-store mode preserves stale-while-revalidate behavior', function (): void {
@@ -245,7 +267,7 @@ it('does not recompute when a fresh payload already exists', function (): void {
         ->and($calls)->toBe(0);
 });
 
-it('returns null gracefully when local pointer is corrupt and no fallback payload exists', function (): void {
+it('returns null gracefully when stray pointer metadata exists for a base-key read', function (): void {
     $manager = app(HybridCacheManager::class);
 
     Cache::store('local-array')->put('hybrid-cache:orphan-pointer:active', 'invalid', 60);
@@ -253,5 +275,5 @@ it('returns null gracefully when local pointer is corrupt and no fallback payloa
     $value = $manager->get('orphan-pointer');
 
     expect($value)->toBeNull()
-        ->and(Cache::store('local-array')->get('hybrid-cache:orphan-pointer:active'))->toBeNull();
+        ->and(Cache::store('local-array')->get('hybrid-cache:orphan-pointer:active'))->toBe('invalid');
 });

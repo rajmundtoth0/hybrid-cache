@@ -31,7 +31,86 @@ final class HybridCacheConfigService
             distributedStore: $distributedStore,
             staleTtl: max(0, $staleTtl),
             lockTtl: max(1, $lockTtl),
+            coordinatedKeys: $this->refreshKeyModes(),
+            coordinatedPrefixes: $this->refreshPrefixModes(),
         );
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private function refreshKeyModes(): array
+    {
+        $modes = [];
+
+        foreach ($this->refreshDefinitions('keys') as $key => $definition) {
+            $modes[$key] = $this->isCoordinated($definition);
+        }
+
+        return $modes;
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private function refreshPrefixModes(): array
+    {
+        $modes = [];
+
+        foreach ($this->refreshDefinitions('prefixes') as $prefix => $definition) {
+            if ($prefix === '') {
+                continue;
+            }
+
+            $modes[$prefix] = $this->isCoordinated($definition);
+        }
+
+        uksort(
+            $modes,
+            static fn (string $left, string $right): int => strlen($right) <=> strlen($left) ?: strcmp($left, $right)
+        );
+
+        return $modes;
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function refreshDefinitions(string $section): array
+    {
+        $value = $this->config->get('hybrid-cache.refresh.'.$section, []);
+
+        if (! is_array($value)) {
+            return [];
+        }
+
+        $definitions = [];
+
+        foreach ($value as $key => $definition) {
+            if (! is_string($key) || ! is_array($definition)) {
+                continue;
+            }
+
+            $normalized = [];
+
+            foreach ($definition as $definitionKey => $definitionValue) {
+                if (is_string($definitionKey)) {
+                    $normalized[$definitionKey] = $definitionValue;
+                }
+            }
+
+            $definitions[$key] = $normalized;
+        }
+
+        return $definitions;
+    }
+
+    /**
+     * @param array<string, mixed> $definition
+     */
+    private function isCoordinated(array $definition): bool
+    {
+        return ($definition['coordinated'] ?? false) === true;
     }
 
     /**

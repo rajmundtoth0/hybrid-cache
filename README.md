@@ -189,7 +189,7 @@ Behavior summary once you opt into stale serving:
 
 - fresh values are returned immediately from the local layer when available
 - local misses fall back to the distributed layer and rehydrate the local layer
-- the active pointer for coordinated refresh lives only in the local cache (APCu)
+- the active pointer for coordinated refresh lives only in the local cache (APCu) for keys explicitly marked `coordinated => true`
 - stale values are returned during the stale window while a refresh is coordinated behind a lock
 - hard-expired values trigger a refresh before a new value is stored
 
@@ -199,11 +199,11 @@ Behavior summary once you opt into stale serving:
 HybridCache::forget('dashboard:stats');
 ```
 
-## Optional coordinated refresh (HTTP / CLI)
+## Optional coordinated refresh (Programmatic / HTTP / CLI)
 
 You do not need this section to get value from the package. The default path is still: cache with a TTL and let values expire naturally.
 
-If you want more control, the package can optionally expose a **signed POST endpoint** and an **Artisan command** to trigger coordinated refreshes on a node. These are disabled by default and are intended for trusted/internal use cases such as deploy hooks, admin-triggered updates, and orchestration.
+If you want more control, the package can optionally expose a **programmatic service API**, a **signed POST endpoint**, and an **Artisan command** to trigger refreshes on a node. The HTTP and CLI entry points are disabled by default and are intended for trusted/internal use cases such as deploy hooks, admin-triggered updates, and orchestration.
 
 Key properties:
 
@@ -211,7 +211,9 @@ Key properties:
 - POST only
 - signed URLs required
 - rate limited
-- safe promotion flow (lock → write distributed payload → update local slot → flip local pointer)
+- ordinary refresh definitions write directly to the base key
+- add `coordinated => true` only for keys or prefixes that need the local slot/pointer promotion flow
+- coordinated promotion flow stays safe (lock → write distributed payload → update local slot → flip local pointer)
 
 Local pointers live in the local cache only. If you need to reset them, use the HTTP/CLI refresh or clear the local cache; the distributed store is never queried for the active pointer.
 
@@ -228,6 +230,7 @@ Enable the endpoint and define refreshers in `config/hybrid-cache.php`:
             'ttl' => 300,
             'stale_ttl' => 60,
             'group' => 'dashboard',
+            'coordinated' => true,
         ],
     ],
     'groups' => [
@@ -237,6 +240,25 @@ Enable the endpoint and define refreshers in `config/hybrid-cache.php`:
     ],
 ],
 ```
+
+Without `coordinated => true`, refreshes stay on the fast base-key TTL/SWR path and do not create local `:active` or `:slot:*` entries.
+
+Trigger programmatically:
+
+```php
+use rajmundtoth0\HybridCache\Services\HybridCacheRefresherService;
+
+$result = app(HybridCacheRefresherService::class)->refresh(
+    key: 'dashboard:stats',
+);
+
+$groupResult = app(HybridCacheRefresherService::class)->refresh(
+    group: 'dashboard',
+    refreshKeys: true,
+);
+```
+
+`refresh()` is the general application-facing entry point. It expects exactly one of `key`, `prefix`, or `group`. If you already know the specific target type, you can also call `refreshKey()`, `refreshPrefix()`, or `refreshGroup()` directly.
 
 Trigger via HTTP:
 
@@ -315,8 +337,11 @@ All nodes read from and write to the same distributed store. Local state is a re
 **Distributed reads do not depend on pointer state.**
 The distributed store is always queried by base key. Pointer keys (`:active`, `:slot:*`) live in the local store only and are never consulted during a distributed read. A corrupt or missing local pointer never prevents a distributed lookup.
 
-**A corrupt local pointer never breaks a simple read.**
-If the local pointer holds an invalid value, it is cleared and the read falls back to the base key. If the base key also has no payload, the read returns `null` without throwing.
+**Pointer metadata is opt-in per refresh definition.**
+Keys use the fast base-key path by default. Pointer keys (`:active`, `:slot:*`) are only read for definitions marked `coordinated => true`.
+
+**A corrupt coordinated pointer never breaks a read.**
+If a coordinated key's local pointer holds an invalid value, it is cleared and the read falls back to the base key. If the base key also has no payload, the read returns `null` without throwing.
 
 **Stale values do not overwrite fresher state.**
 Stale refreshes are lock-protected. Once a fresh envelope is committed, a concurrent stale path cannot overwrite it because the distributed lock is released only after the fresh payload is written.
@@ -427,21 +452,22 @@ Measured on the included Redis-backed benchmark harness with:
 - `work_ms=40`
 - `cold_runs=12`
 - `warm_runs=40`
+- each payload size averaged across `3` benchmark runs on the current branch
 
 Results:
 
-| Scenario              | Count |     Avg |  Median |     P95 |     Min |      Max |
-| --------------------- | ----: | ------: | ------: | ------: | ------: | -------: |
-| With package, cold    |    12 | 49.18ms | 43.89ms | 44.85ms | 42.56ms | 109.57ms |
-| Without package, cold |    12 | 47.50ms | 42.47ms | 43.58ms | 41.89ms | 101.51ms |
-| With package, warm    |    40 |  0.21ms |  0.17ms |  0.29ms |  0.16ms |   0.95ms |
-| Without package, warm |    40 |  1.33ms |  1.26ms |  1.89ms |  0.96ms |   2.58ms |
+| Payload | Approx size | With package, cold | With package, warm | Without package, cold | Without package, warm |
+| ------- | ----------: | ------------------: | ------------------: | ---------------------: | ---------------------: |
+| Tiny metadata payload |    `104B`   |            `45.80ms` |             `0.28ms` |              `44.23ms` |               `1.26ms` |
+| `100KB` | `102,514B`  |            `45.73ms` |             `0.28ms` |              `44.68ms` |               `1.40ms` |
+| `2MB`   | `2,097,266B`|            `53.83ms` |             `1.01ms` |              `48.94ms` |               `5.72ms` |
 
 Interpretation:
 
-- cold misses are slightly slower with the package because the first miss still computes the value and persists the hybrid envelope
-- warm hits are materially faster with the package because the local APCu layer avoids the Redis round trip
-- stale serving works as intended: the stale hit returned in 1.88ms with the same token, and the later request returned in 1.65ms with a new token after background refresh completed
+- cold misses stay in the same general band because both variants still pay the compute cost and a distributed write on the first hit
+- warm hits are materially faster with the package because the local APCu layer avoids the Redis round trip on repeated reads
+- the warm-hit advantage remains clear as payload size grows: at `2MB`, the package warm path averaged about `1.01ms` versus `5.72ms` without the package
+- stale serving continues to work as intended across payload sizes: the stale hit returns quickly with the same token, and the later request returns with a new token after refresh completes
 
 ### Run them side by side
 

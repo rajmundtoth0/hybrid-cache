@@ -15,6 +15,7 @@ it('refreshes a key via artisan', function (): void {
             'handler' => fn (): string => 'value',
             'ttl' => 60,
             'stale_ttl' => 0,
+            'coordinated' => true,
         ],
     ]);
 
@@ -47,6 +48,7 @@ it('refreshes all keys in a group when requested', function (): void {
             'handler' => fn (): string => 'value',
             'ttl' => 60,
             'stale_ttl' => 0,
+            'coordinated' => true,
         ],
     ]);
 
@@ -70,6 +72,7 @@ it('supports prefix refresh without a group', function (): void {
             'ttl' => 60,
             'stale_ttl' => 0,
             'keys' => ['pref:key'],
+            'coordinated' => true,
         ],
     ]);
 

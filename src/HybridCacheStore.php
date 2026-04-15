@@ -22,7 +22,7 @@ final class HybridCacheStore implements LockProvider, Store
     }
 
     /**
-     * @param array<array-key, UnitEnum|string> $keys
+     * @param array<array-key, \UnitEnum|string> $keys
      * @return array<array-key, mixed>
      */
     public function many(array $keys): array

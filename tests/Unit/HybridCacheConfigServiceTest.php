@@ -11,6 +11,14 @@ it('builds config from hybrid-cache defaults', function (): void {
     config()->set('hybrid-cache.distributed_store', 'distributed-array');
     config()->set('hybrid-cache.stale_ttl', 10);
     config()->set('hybrid-cache.lock_ttl', 3);
+    config()->set('hybrid-cache.refresh.keys', [
+        'reports:daily' => ['coordinated' => true],
+        'reports:summary' => ['coordinated' => false],
+    ]);
+    config()->set('hybrid-cache.refresh.prefixes', [
+        'users:' => ['coordinated' => true],
+        'users:public:' => ['coordinated' => false],
+    ]);
 
     $config = app(HybridCacheConfigService::class)->make();
 
@@ -18,7 +26,11 @@ it('builds config from hybrid-cache defaults', function (): void {
         ->and($config->localStore)->toBe('local-array')
         ->and($config->distributedStore)->toBe('distributed-array')
         ->and($config->staleTtl)->toBe(10)
-        ->and($config->lockTtl)->toBe(3);
+        ->and($config->lockTtl)->toBe(3)
+        ->and($config->isCoordinated('reports:daily'))->toBeTrue()
+        ->and($config->isCoordinated('reports:summary'))->toBeFalse()
+        ->and($config->isCoordinated('users:42'))->toBeTrue()
+        ->and($config->isCoordinated('users:public:42'))->toBeFalse();
 });
 
 it('applies store overrides with normalization', function (): void {
@@ -78,4 +90,26 @@ it('uses hard-coded defaults when config keys are absent', function (): void {
         ->and($config->distributedStore)->toBe('file')
         ->and($config->staleTtl)->toBe(300)
         ->and($config->lockTtl)->toBe(30);
+});
+
+it('resolves coordinated mode with exact-key and longest-prefix precedence', function (): void {
+    config()->set('hybrid-cache.refresh.keys', [
+        'users:admin:root' => ['coordinated' => false],
+        'reports:monthly' => ['coordinated' => true],
+        'ignored-key' => 'invalid',
+    ]);
+    config()->set('hybrid-cache.refresh.prefixes', [
+        'users:' => ['coordinated' => true],
+        'users:admin:' => ['coordinated' => false],
+        '' => ['coordinated' => true],
+        'ignored-prefix' => 'invalid',
+    ]);
+
+    $config = app(HybridCacheConfigService::class)->make();
+
+    expect($config->isCoordinated('reports:monthly'))->toBeTrue()
+        ->and($config->isCoordinated('users:42'))->toBeTrue()
+        ->and($config->isCoordinated('users:admin:42'))->toBeFalse()
+        ->and($config->isCoordinated('users:admin:root'))->toBeFalse()
+        ->and($config->isCoordinated('no-match'))->toBeFalse();
 });

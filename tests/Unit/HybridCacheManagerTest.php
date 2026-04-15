@@ -173,11 +173,15 @@ it('falls back to building a fresh payload when refresh waits do not find distri
 
     $envelope = $method->invoke(
         $manager,
+        'refresh-fallback',
         'hybrid-cache:refresh-fallback',
         'hybrid-cache:lock:refresh-fallback',
         fn (): string => 'fresh-after-wait',
         60,
         0,
+        null,
+        null,
+        false,
     );
 
     $lock->release();
@@ -200,11 +204,15 @@ it('hydrates from distributed payloads discovered while waiting for a lock', fun
 
     $refreshed = $method->invoke(
         $manager,
+        'refresh-hit',
         $payloadKey,
         'hybrid-cache:lock:refresh-hit',
         fn (): string => 'builder-value',
         60,
         0,
+        null,
+        null,
+        false,
     );
 
     $lock->release();
