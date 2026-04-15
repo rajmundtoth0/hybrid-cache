@@ -5,12 +5,11 @@ declare(strict_types=1);
 namespace rajmundtoth0\HybridCache;
 
 use Closure;
-use BackedEnum;
 use DateInterval;
 use DateTimeImmutable;
 use DateTimeInterface;
 use Illuminate\Cache\Repository;
-use UnitEnum;
+use rajmundtoth0\HybridCache\Utils\KeyNormalizer;
 
 final class HybridCacheRepository extends Repository
 {
@@ -31,24 +30,13 @@ final class HybridCacheRepository extends Repository
         $staleSeconds = $this->normalizeTtlToSeconds($staleTtl);
 
         return $this->manager->flexible(
-            key: $this->normalizeKey($key),
+            key: KeyNormalizer::normalize($key),
             ttl: $freshSeconds,
             callback: $callback,
             staleTtl: max(0, $staleSeconds - $freshSeconds),
+            lock: is_array($lock) ? $lock : null,
+            alwaysDefer: (bool) $alwaysDefer,
         );
-    }
-
-    private function normalizeKey(string|UnitEnum $key): string
-    {
-        if (is_string($key)) {
-            return $key;
-        }
-
-        if ($key instanceof BackedEnum) {
-            return (string) $key->value;
-        }
-
-        return $key->name;
     }
 
     private function isSupportedTtl(mixed $ttl): bool
@@ -71,7 +59,30 @@ final class HybridCacheRepository extends Repository
             throw new \InvalidArgumentException('Hybrid cache store expects flexible TTLs in the Laravel format: [fresh, stale].');
         }
 
-        return [$ttl[0], $ttl[1]];
+        $fresh = $this->requireSupportedTtl($ttl[0]);
+        $stale = $this->requireSupportedTtl($ttl[1]);
+
+        return [$fresh, $stale];
+    }
+
+    /**
+     * @return int|DateInterval|DateTimeInterface
+     */
+    private function requireSupportedTtl(mixed $ttl): int|DateInterval|DateTimeInterface
+    {
+        if (is_int($ttl)) {
+            return $ttl;
+        }
+
+        if ($ttl instanceof DateInterval) {
+            return $ttl;
+        }
+
+        if ($ttl instanceof DateTimeInterface) {
+            return $ttl;
+        }
+
+        throw new \InvalidArgumentException('Hybrid cache store expects flexible TTLs in the Laravel format: [fresh, stale].');
     }
 
     private function normalizeTtlToSeconds(int|DateInterval|DateTimeInterface $ttl): int

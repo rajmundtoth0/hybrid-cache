@@ -5,6 +5,9 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Cache;
 use rajmundtoth0\HybridCache\Facades\HybridCache;
 use rajmundtoth0\HybridCache\HybridCacheManager;
+use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
+use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
+use rajmundtoth0\HybridCache\Services\HybridLocalCacheService;
 
 it('returns the locally cached value without recomputing', function (): void {
     $calls = 0;
@@ -139,6 +142,28 @@ it('forgets both cache layers', function (): void {
         ->and(Cache::store('local-array')->get('hybrid-cache:forget-me'))->toBeNull();
 });
 
+it('forgets active pointers and slot payloads after a coordinated refresh', function (): void {
+    config()->set('hybrid-cache.refresh.keys', [
+        'forget-slot' => ['coordinated' => true],
+    ]);
+
+    $manager = app(HybridCacheManager::class);
+    $payloadKey = 'hybrid-cache:forget-slot';
+
+    $manager->coordinatedRefresh('forget-slot', fn (): string => 'value', 60, 0);
+
+    expect(Cache::store('local-array')->get($payloadKey.':active'))->toBe('b')
+        ->and(Cache::store('local-array')->get($payloadKey.':slot:b'))->toBeArray();
+
+    expect($manager->forget('forget-slot'))->toBeTrue()
+        ->and(Cache::store('distributed-array')->get($payloadKey))->toBeNull()
+        ->and(Cache::store('local-array')->get($payloadKey))->toBeNull()
+        ->and(Cache::store('local-array')->get($payloadKey.':active'))->toBeNull()
+        ->and(Cache::store('local-array')->get($payloadKey.':slot:a'))->toBeNull()
+        ->and(Cache::store('local-array')->get($payloadKey.':slot:b'))->toBeNull()
+        ->and($manager->get('forget-slot'))->toBeNull();
+});
+
 it('respects store-level overrides for prefix and stale ttl', function (): void {
     config()->set('cache.stores.hybrid-overrides', [
         'driver' => 'hybrid',
@@ -152,8 +177,11 @@ it('respects store-level overrides for prefix and stale ttl', function (): void 
     $manager = new HybridCacheManager(
         app: app(),
         cache: app('cache'),
-        config: app('config'),
-        storeConfig: config('cache.stores.hybrid-overrides'),
+        config: $hybridConfig = app(HybridCacheConfigService::class)->make(
+            config('cache.stores.hybrid-overrides', [])
+        ),
+        lockService: new HybridCacheLockService(cache: app('cache'), config: $hybridConfig),
+        localCache: new HybridLocalCacheService(),
     );
 
     $value = $manager->flexible('override-key', 1, fn (): string => 'override-value');
@@ -172,4 +200,80 @@ it('throws for invalid flexible ttl input', function (): void {
 
     expect(fn () => $store->flexible('invalid', 60, fn (): string => 'value'))
         ->toThrow(\InvalidArgumentException::class);
+});
+
+it('simple reads ignore pointer state on the base-key path', function (): void {
+    Cache::store('local-array')->put('hybrid-cache:simple-read:active', 'invalid', 60);
+    Cache::store('distributed-array')->put('hybrid-cache:simple-read', [
+        'value' => 'distributed-value',
+        'fresh_until' => time() + 60,
+        'stale_until' => time() + 120,
+    ], 120);
+
+    $value = HybridCache::flexible(
+        key: 'simple-read',
+        ttl: 60,
+        callback: fn (): string => 'recomputed',
+    );
+
+    expect($value)->toBe('distributed-value')
+        ->and(Cache::store('local-array')->get('hybrid-cache:simple-read'))->toBeArray()
+        ->and(Cache::store('local-array')->get('hybrid-cache:simple-read:active'))->toBe('invalid');
+});
+
+it('single-store mode preserves stale-while-revalidate behavior', function (): void {
+    $config = app(HybridCacheConfigService::class)->make([
+        'local_store' => 'distributed-array',
+        'distributed_store' => 'distributed-array',
+    ]);
+    $manager = new HybridCacheManager(
+        app: app(),
+        cache: app('cache'),
+        config: $config,
+        lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+        localCache: new HybridLocalCacheService(),
+    );
+
+    Cache::store('distributed-array')->put('hybrid-cache:swr-single', [
+        'value' => 'stale',
+        'fresh_until' => time() - 5,
+        'stale_until' => time() + 60,
+    ], 65);
+
+    // In console (test env) the stale refresh runs synchronously.
+    $served = $manager->flexible('swr-single', 30, fn (): string => 'fresh', 60);
+    $next = $manager->get('swr-single');
+
+    expect($served)->toBe('stale')
+        ->and($next)->toBe('fresh');
+});
+
+it('does not recompute when a fresh payload already exists', function (): void {
+    $calls = 0;
+
+    HybridCache::flexible('already-fresh', 60, fn (): string => 'first');
+
+    $value = HybridCache::flexible(
+        key: 'already-fresh',
+        ttl: 60,
+        callback: function () use (&$calls): string {
+            $calls++;
+
+            return 'recomputed';
+        },
+    );
+
+    expect($value)->toBe('first')
+        ->and($calls)->toBe(0);
+});
+
+it('returns null gracefully when stray pointer metadata exists for a base-key read', function (): void {
+    $manager = app(HybridCacheManager::class);
+
+    Cache::store('local-array')->put('hybrid-cache:orphan-pointer:active', 'invalid', 60);
+
+    $value = $manager->get('orphan-pointer');
+
+    expect($value)->toBeNull()
+        ->and(Cache::store('local-array')->get('hybrid-cache:orphan-pointer:active'))->toBe('invalid');
 });

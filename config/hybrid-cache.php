@@ -12,4 +12,66 @@ return [
     'lock_ttl' => (int) env('HYBRID_CACHE_LOCK_TTL', 30),
 
     'key_prefix' => env('HYBRID_CACHE_PREFIX', 'hybrid-cache:'),
+
+    'refresh' => [
+        'default_ttl' => (int) env('HYBRID_CACHE_REFRESH_TTL', 60),
+
+        'http' => [
+            'enabled' => (bool) env('HYBRID_CACHE_REFRESH_HTTP', false),
+            'path' => env('HYBRID_CACHE_REFRESH_PATH', '/hybrid-cache/refresh'),
+            'middleware' => [
+                'signed',
+                'throttle:60,1',
+            ],
+        ],
+
+        /**
+         * Keys that can be refreshed via HTTP/CLI.
+         * Add 'coordinated' => true only when the key should use the local
+         * active-slot pointer path; ordinary TTL/SWR keys stay on the base-key path.
+         *
+         * Example:
+         * 'keys' => [
+         *     'dashboard:stats' => [
+         *         'handler' => [\App\Cache\DashboardStats::class, 'build'],
+         *         'ttl' => 300,
+         *         'stale_ttl' => 60,
+         *         'group' => 'dashboard',
+         *         'coordinated' => true,
+         *     ],
+         * ],
+         */
+        'keys' => [],
+
+        /**
+         * Prefix refreshers. Used when a key does not have an exact match.
+         * Add 'coordinated' => true only when matching keys should use the
+         * local active-slot pointer path.
+         *
+         * Example:
+         * 'prefixes' => [
+         *     'users:' => [
+         *         'handler' => [\App\Cache\UserCache::class, 'buildByKey'],
+         *         'ttl' => 300,
+         *         'stale_ttl' => 60,
+         *         'group' => 'users',
+         *         'keys' => ['users:index'],
+         *         'coordinated' => true,
+         *     ],
+         * ],
+         */
+        'prefixes' => [],
+
+        /**
+         * Refresh groups.
+         *
+         * Example:
+         * 'groups' => [
+         *     'dashboard' => [
+         *         'keys' => ['dashboard:stats', 'dashboard:overview'],
+         *     ],
+         * ],
+         */
+        'groups' => [],
+    ],
 ];

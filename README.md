@@ -1,23 +1,36 @@
 # Hybrid Cache
 
-Hybrid Cache is a Laravel 12+ package for application-level caching with three opinionated behaviors out of the box:
+[![Version](https://poser.pugx.org/rajmundtoth0/hybrid-cache/version)](https://packagist.org/packages/rajmundtoth0/hybrid-cache)
+[![codecov](https://codecov.io/gh/rajmundtoth0/hybrid-cache/graph/badge.svg)](https://app.codecov.io/gh/rajmundtoth0/hybrid-cache)
+[![PHPStan](https://img.shields.io/badge/PHPStan-Level_MAX-brightgreen)](https://phpstan.org/)
+[![Build](https://github.com/rajmundtoth0/hybrid-cache/actions/workflows/ci.yml/badge.svg)](https://github.com/rajmundtoth0/hybrid-cache/actions/workflows/ci.yml)
+[![PHP Version Require](https://poser.pugx.org/rajmundtoth0/hybrid-cache/require/php)](https://packagist.org/packages/rajmundtoth0/hybrid-cache)
+[![License](https://poser.pugx.org/rajmundtoth0/hybrid-cache/license)](https://packagist.org/packages/rajmundtoth0/hybrid-cache)
+[![Total Downloads](https://poser.pugx.org/rajmundtoth0/hybrid-cache/downloads)](https://packagist.org/packages/rajmundtoth0/hybrid-cache)
 
-- a local cache layer for fast reads on the current node
-- a distributed cache layer for shared state across nodes
-- managed stale-while-revalidate semantics for controlled refreshes under load
+Hybrid Cache is a Laravel 12+ package for application-level caching with a simple default path:
 
-It is designed for the common case where a Laravel app wants a small, predictable API and production-safe defaults without building a custom two-tier caching strategy from scratch.
+- pick a TTL
+- cache the value locally and remotely
+- let the value expire naturally
+- do not require remote invalidation machinery to get started
+
+If that is all you need, the package stays small and predictable. When you need more, it also supports a local cache layer for fast reads on the current node, a distributed cache layer for shared state across nodes, and stale-while-revalidate semantics for controlled refreshes under load.
+
+The intent is to make the common case easy first: use TTL-based caching without building a custom invalidation system, then opt into coordinated refresh and operational tooling only when your workload actually needs it.
 
 ## Why this package exists
 
-Laravel gives you strong cache primitives, but most applications still have to assemble the same pieces themselves when they want all of the following at once:
+Most applications do not need remote invalidation as their first step. They need a cache key, a TTL, and behavior that stays understandable under load.
+
+Laravel gives you strong cache primitives, but once an application wants to combine a local cache, a shared cache, and safe refresh behavior, teams usually end up assembling the same pieces themselves:
 
 - a fast local layer
 - a shared distributed layer
 - stale reads during refresh windows
 - refresh coordination to avoid stampedes
 
-This package packages that behavior into a single Laravel-native abstraction with minimal configuration and a deliberately small public API.
+This package wraps that behavior in a single Laravel-native abstraction with minimal configuration and a deliberately small public API.
 
 ## Installation
 
@@ -42,6 +55,17 @@ return [
     'stale_ttl' => (int) env('HYBRID_CACHE_STALE_TTL', 300),
     'lock_ttl' => (int) env('HYBRID_CACHE_LOCK_TTL', 30),
     'key_prefix' => env('HYBRID_CACHE_PREFIX', 'hybrid-cache:'),
+    'refresh' => [
+        'default_ttl' => (int) env('HYBRID_CACHE_REFRESH_TTL', 60),
+        'http' => [
+            'enabled' => false,
+            'path' => '/hybrid-cache/refresh',
+            'middleware' => ['signed', 'throttle:60,1'],
+        ],
+        'keys' => [],
+        'prefixes' => [],
+        'groups' => [],
+    ],
 ];
 ```
 
@@ -101,25 +125,40 @@ Recommended production setup:
 - distributed store: `redis`, `memcached`, or `database`, depending on your existing Laravel cache setup
 - stale window: keep it short and deliberate so stale responses are bounded and understandable
 
+If you want the simplest rollout, start with a TTL and let expiration do the invalidation work. You can add coordinated refresh later without changing the basic read API.
+
 If both configured stores are the same, the package still works, but it behaves as a single-store SWR cache instead of a true hybrid cache.
 
 ## Usage
 
-### Minimal usage
+### Start simple
+
+If you just want TTL-based caching without remote invalidation, start here:
 
 ```php
 use rajmundtoth0\HybridCache\Facades\HybridCache;
 
-$value = HybridCache::flexible(
-    key: 'users:index',
-    ttl: 3600,
-    callback: fn () => User::query()->latest()->take(50)->get(),
+$users = HybridCache::flexible(
+  key: 'users:index',
+  ttl: 300,
+  callback: fn () => User::query()->latest()->take(50)->get(),
 );
 ```
 
-### With an explicit stale window
+That gives you a small, production-friendly path:
+
+- set a TTL
+- cache locally for fast reads
+- share state through the distributed store
+- let expiration drive refresh instead of wiring custom invalidation flows
+
+For many applications, that is enough. You can stop there and keep the model simple.
+
+### Add a stale window when needed
 
 ```php
+use rajmundtoth0\HybridCache\Facades\HybridCache;
+
 $value = HybridCache::flexible(
     key: 'dashboard:stats',
     ttl: 300,
@@ -146,10 +185,11 @@ The `flexible` call on the `hybrid` store follows Laravel 12's native signature:
 - the second TTL value is the total serveable lifetime, including stale time
 - `[300, 330]` means 5 minutes fresh and up to 30 additional seconds stale
 
-Behavior summary:
+Behavior summary once you opt into stale serving:
 
 - fresh values are returned immediately from the local layer when available
 - local misses fall back to the distributed layer and rehydrate the local layer
+- the active pointer for coordinated refresh lives only in the local cache (APCu) for keys explicitly marked `coordinated => true`
 - stale values are returned during the stale window while a refresh is coordinated behind a lock
 - hard-expired values trigger a refresh before a new value is stored
 
@@ -157,6 +197,99 @@ Behavior summary:
 
 ```php
 HybridCache::forget('dashboard:stats');
+```
+
+## Optional coordinated refresh (Programmatic / HTTP / CLI)
+
+You do not need this section to get value from the package. The default path is still: cache with a TTL and let values expire naturally.
+
+If you want more control, the package can optionally expose a **programmatic service API**, a **signed POST endpoint**, and an **Artisan command** to trigger refreshes on a node. The HTTP and CLI entry points are disabled by default and are intended for trusted/internal use cases such as deploy hooks, admin-triggered updates, and orchestration.
+
+Key properties:
+
+- disabled by default
+- POST only
+- signed URLs required
+- rate limited
+- ordinary refresh definitions write directly to the base key
+- add `coordinated => true` only for keys or prefixes that need the local slot/pointer promotion flow
+- coordinated promotion flow stays safe (lock → write distributed payload → update local slot → flip local pointer)
+
+Local pointers live in the local cache only. If you need to reset them, use the HTTP/CLI refresh or clear the local cache; the distributed store is never queried for the active pointer.
+
+Enable the endpoint and define refreshers in `config/hybrid-cache.php`:
+
+```php
+'refresh' => [
+    'http' => [
+        'enabled' => true,
+    ],
+    'keys' => [
+        'dashboard:stats' => [
+            'handler' => [\App\Cache\DashboardStats::class, 'build'],
+            'ttl' => 300,
+            'stale_ttl' => 60,
+            'group' => 'dashboard',
+            'coordinated' => true,
+        ],
+    ],
+    'groups' => [
+        'dashboard' => [
+            'keys' => ['dashboard:stats'],
+        ],
+    ],
+],
+```
+
+Without `coordinated => true`, refreshes stay on the fast base-key TTL/SWR path and do not create local `:active` or `:slot:*` entries.
+
+Trigger programmatically:
+
+```php
+use rajmundtoth0\HybridCache\Services\HybridCacheRefresherService;
+
+$result = app(HybridCacheRefresherService::class)->refresh(
+    key: 'dashboard:stats',
+);
+
+$groupResult = app(HybridCacheRefresherService::class)->refresh(
+    group: 'dashboard',
+    refreshKeys: true,
+);
+```
+
+`refresh()` is the general application-facing entry point. It expects exactly one of `key`, `prefix`, or `group`. If you already know the specific target type, you can also call `refreshKey()`, `refreshPrefix()`, or `refreshGroup()` directly.
+
+Trigger via HTTP:
+
+```php
+use Illuminate\Support\Facades\URL;
+
+$url = URL::signedRoute('hybrid-cache.refresh');
+
+// POST JSON: { "key": "dashboard:stats" }
+```
+
+Trigger via CLI:
+
+```bash
+php artisan hybrid-cache:refresh dashboard:stats
+php artisan hybrid-cache:refresh --group=dashboard --all
+```
+
+### Optional group versions
+
+You can use group versions to implement **lazy group refresh** without wildcard deletion:
+
+```php
+$version = HybridCache::groupVersion('dashboard');
+$key = "dashboard:stats:v{$version}";
+```
+
+Then trigger a group refresh to bump the version (and optionally refresh a subset of hot keys):
+
+```bash
+php artisan hybrid-cache:refresh --group=dashboard
 ```
 
 ## API design
@@ -186,7 +319,7 @@ Read path:
 4. If the value is stale but still serveable, return it and coordinate a refresh.
 5. If the value is missing or expired, refresh and persist a new envelope.
 
-Refresh coordination:
+Optional refresh coordination:
 
 - the distributed store owns the refresh lock
 - if the underlying cache store supports native locks, the package uses them
@@ -194,9 +327,39 @@ Refresh coordination:
 
 This keeps the first version small while still covering the critical production case of stale serving plus refresh coordination.
 
+## Behavior guarantees
+
+These are the invariants the package is designed to uphold. They are verified by the test suite.
+
+**The distributed store is the shared source of truth.**
+All nodes read from and write to the same distributed store. Local state is a read-through cache; it caches distributed results for the current node only and is never authoritative.
+
+**Distributed reads do not depend on pointer state.**
+The distributed store is always queried by base key. Pointer keys (`:active`, `:slot:*`) live in the local store only and are never consulted during a distributed read. A corrupt or missing local pointer never prevents a distributed lookup.
+
+**Pointer metadata is opt-in per refresh definition.**
+Keys use the fast base-key path by default. Pointer keys (`:active`, `:slot:*`) are only read for definitions marked `coordinated => true`.
+
+**A corrupt coordinated pointer never breaks a read.**
+If a coordinated key's local pointer holds an invalid value, it is cleared and the read falls back to the base key. If the base key also has no payload, the read returns `null` without throwing.
+
+**Stale values do not overwrite fresher state.**
+Stale refreshes are lock-protected. Once a fresh envelope is committed, a concurrent stale path cannot overwrite it because the distributed lock is released only after the fresh payload is written.
+
+**Coordinated refresh always writes to the inactive slot.**
+`coordinatedRefresh()` writes to the slot that is not currently named by the active pointer, then flips the pointer atomically. Readers see the old slot until the flip, then see the new envelope — there is no window where the active slot contains a partially-written payload.
+
+**Hydration preserves the envelope's original timestamps.**
+When the local store is hydrated from distributed data, the `fresh_until` and `stale_until` timestamps are copied as-is. A stale distributed envelope is hydrated as stale; a fresh envelope is hydrated as fresh. Hydration never extends or shortens the serveable window.
+
+**Single-store mode is explicitly supported.**
+When `local_store` and `distributed_store` name the same cache driver, the package operates as a single-store stale-while-revalidate cache. Local-only mechanics (active pointers, slot writes) are automatically bypassed. No pointer-specific behavior is required for correctness.
+
 ## Testing and quality tools
 
 - Tests: Pest
+- Mutation testing: Pest `--mutate`
+- CI: GitHub Actions runs tests on PHP 8.2, 8.3, and 8.4, plus a dedicated Xdebug coverage job
 - Static analysis: PHPStan at max level via Larastan
 - Static policy checks: `rajmundtoth0/phpstan-forbidden` to ban debugging and output constructs in package source
 - Formatting: PHP CS Fixer
@@ -205,14 +368,29 @@ Available commands:
 
 ```bash
 composer test
+composer test-coverage
+composer mutate
+composer mutate-bail
 composer analyse
 composer format
 composer quality
 ```
 
+Coverage and mutation testing use Xdebug:
+
+```bash
+XDEBUG_MODE=coverage composer test-coverage
+XDEBUG_MODE=coverage composer mutate
+```
+
+The Clover report is written to `build/coverage/clover.xml`.
+
+Mutation testing currently runs Pest in `--everything --covered-only` mode because the suite does not yet annotate tests with `covers()` or `mutates()`. Adding those annotations later will make mutation runs narrower and faster.
+
 There is also a small `Makefile` for the demo workflow:
 
 ```bash
+make coverage
 make benchmark-build
 make benchmark-run-with
 make benchmark-run-without
@@ -274,21 +452,22 @@ Measured on the included Redis-backed benchmark harness with:
 - `work_ms=40`
 - `cold_runs=12`
 - `warm_runs=40`
+- each payload size averaged across `3` benchmark runs on the current branch
 
 Results:
 
-| Scenario | Count | Avg | Median | P95 | Min | Max |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| With package, cold | 12 | 49.18ms | 43.89ms | 44.85ms | 42.56ms | 109.57ms |
-| Without package, cold | 12 | 47.50ms | 42.47ms | 43.58ms | 41.89ms | 101.51ms |
-| With package, warm | 40 | 0.21ms | 0.17ms | 0.29ms | 0.16ms | 0.95ms |
-| Without package, warm | 40 | 1.33ms | 1.26ms | 1.89ms | 0.96ms | 2.58ms |
+| Payload | Approx size | With package, cold | With package, warm | Without package, cold | Without package, warm |
+| ------- | ----------: | ------------------: | ------------------: | ---------------------: | ---------------------: |
+| Tiny metadata payload |    `104B`   |            `45.80ms` |             `0.28ms` |              `44.23ms` |               `1.26ms` |
+| `100KB` | `102,514B`  |            `45.73ms` |             `0.28ms` |              `44.68ms` |               `1.40ms` |
+| `2MB`   | `2,097,266B`|            `53.83ms` |             `1.01ms` |              `48.94ms` |               `5.72ms` |
 
 Interpretation:
 
-- cold misses are slightly slower with the package because the first miss still computes the value and persists the hybrid envelope
-- warm hits are materially faster with the package because the local APCu layer avoids the Redis round trip
-- stale serving works as intended: the stale hit returned in 1.88ms with the same token, and the later request returned in 1.65ms with a new token after background refresh completed
+- cold misses stay in the same general band because both variants still pay the compute cost and a distributed write on the first hit
+- warm hits are materially faster with the package because the local APCu layer avoids the Redis round trip on repeated reads
+- the warm-hit advantage remains clear as payload size grows: at `2MB`, the package warm path averaged about `1.01ms` versus `5.72ms` without the package
+- stale serving continues to work as intended across payload sizes: the stale hit returns quickly with the same token, and the later request returns with a new token after refresh completes
 
 ### Run them side by side
 
@@ -326,12 +505,12 @@ The package demo is expected to show lower cost on repeated local hits and smoot
 
 ## Comparison
 
-| Option | Good at | Less good at | Positioning relative to this package |
-| --- | --- | --- | --- |
+| Option                                                 | Good at                                    | Less good at                                                                                 | Positioning relative to this package                                                      |
+| ------------------------------------------------------ | ------------------------------------------ | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | Laravel `Cache::remember` and direct cache store usage | Simple caching with full framework control | Leaves two-tier orchestration, stale envelopes, and refresh coordination to application code | This package adds a focused, reusable hybrid cache pattern on top of Laravel's primitives |
-| Response cache packages | Caching whole HTTP responses | Not aimed at general application data or service-layer caching | This package targets arbitrary values, not full response caching |
-| Query cache packages | Caching Eloquent or query-builder output | Narrower scope and usually query-centric semantics | This package is general-purpose and not tied to ORM queries |
-| Single-store SWR helpers | Simple stale-while-revalidate behavior | Usually no explicit local+distributed layering | This package centers on a hybrid layout first and then layers SWR on top |
+| Response cache packages                                | Caching whole HTTP responses               | Not aimed at general application data or service-layer caching                               | This package targets arbitrary values, not full response caching                          |
+| Query cache packages                                   | Caching Eloquent or query-builder output   | Narrower scope and usually query-centric semantics                                           | This package is general-purpose and not tied to ORM queries                               |
+| Single-store SWR helpers                               | Simple stale-while-revalidate behavior     | Usually no explicit local+distributed layering                                               | This package centers on a hybrid layout first and then layers SWR on top                  |
 
 This package does not try to replace Laravel's cache system. It provides one specific pattern on top of it: a small, composable abstraction for hybrid caching with bounded stale reads.
 
