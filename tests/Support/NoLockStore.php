@@ -51,6 +51,11 @@ final class NoLockStore implements Store
         return $this->store->forever($key, $value);
     }
 
+    public function touch($key, $seconds)
+    {
+        return $this->store->touch($key, $seconds);
+    }
+
     public function forget($key)
     {
         return $this->store->forget($key);

@@ -13,7 +13,7 @@ WORKDIR /var/www
 
 COPY . /opt/hybrid-cache
 
-RUN composer create-project laravel/laravel demo "^12.0" --prefer-dist --no-interaction
+RUN composer create-project laravel/laravel demo "^13.0" --prefer-dist --no-interaction
 
 WORKDIR /var/www/demo
 
