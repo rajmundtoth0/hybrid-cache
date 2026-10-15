@@ -71,6 +71,11 @@ final class HybridCacheStore implements LockProvider, Store
         return $this->manager->forever(KeyNormalizer::normalize($key), $value);
     }
 
+    public function touch($key, $seconds): bool
+    {
+        return $this->manager->touch(KeyNormalizer::normalize($key), (int) $seconds);
+    }
+
     public function forget($key): bool
     {
         return $this->manager->forget(KeyNormalizer::normalize($key));

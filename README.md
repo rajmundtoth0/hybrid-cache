@@ -8,7 +8,7 @@
 [![License](https://poser.pugx.org/rajmundtoth0/hybrid-cache/license)](https://packagist.org/packages/rajmundtoth0/hybrid-cache)
 [![Total Downloads](https://poser.pugx.org/rajmundtoth0/hybrid-cache/downloads)](https://packagist.org/packages/rajmundtoth0/hybrid-cache)
 
-Hybrid Cache is a Laravel 12+ package for application-level caching with a simple default path:
+Hybrid Cache is a Laravel 13 package for application-level caching with a simple default path:
 
 - pick a TTL
 - cache the value locally and remotely
@@ -33,6 +33,8 @@ Laravel gives you strong cache primitives, but once an application wants to comb
 This package wraps that behavior in a single Laravel-native abstraction with minimal configuration and a deliberately small public API.
 
 ## Installation
+
+Requires PHP 8.3+ and Laravel 13.
 
 ```bash
 composer require rajmundtoth0/hybrid-cache
@@ -68,6 +70,8 @@ return [
     ],
 ];
 ```
+
+Laravel 13's default `cache.serializable_classes` setting disables object unserialization. The package stores its envelopes as arrays, but if your cached values contain objects, explicitly allow those value classes in your application's `config/cache.php`, or convert the values to arrays before caching.
 
 If you want APCu as the local layer, your application needs a Laravel cache store named `apc` and the PHP APCu extension installed. APCu project: https://github.com/krakjoe/apcu
 
@@ -179,7 +183,7 @@ $value = Cache::store('hybrid')->flexible(
 );
 ```
 
-The `flexible` call on the `hybrid` store follows Laravel 12's native signature:
+The `flexible` call on the `hybrid` store follows Laravel 13's native signature:
 
 - the first TTL value is the fresh window
 - the second TTL value is the total serveable lifetime, including stale time
@@ -198,6 +202,14 @@ Behavior summary once you opt into stale serving:
 ```php
 HybridCache::forget('dashboard:stats');
 ```
+
+### Update a key's expiration
+
+```php
+Cache::store('hybrid')->touch('dashboard:stats', 300);
+```
+
+`touch` keeps the current distributed value and resets its fresh lifetime to the supplied TTL in both cache layers, without an additional stale window. It returns `false` for missing or expired distributed entries. A zero or negative TTL removes the key.
 
 ## Optional coordinated refresh (Programmatic / HTTP / CLI)
 
@@ -359,7 +371,7 @@ When `local_store` and `distributed_store` name the same cache driver, the packa
 
 - Tests: Pest
 - Mutation testing: Pest `--mutate`
-- CI: GitHub Actions runs tests on PHP 8.2, 8.3, and 8.4, plus a dedicated Xdebug coverage job
+- CI: GitHub Actions runs tests on PHP 8.3, 8.4, and 8.5, plus a dedicated Xdebug coverage job
 - Static analysis: PHPStan at max level via Larastan
 - Static policy checks: `rajmundtoth0/phpstan-forbidden` to ban debugging and output constructs in package source
 - Formatting: PHP CS Fixer

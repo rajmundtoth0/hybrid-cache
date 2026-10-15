@@ -11,16 +11,16 @@
         "swr"
     ],
     "require": {
-        "php": "^8.2",
-        "illuminate/cache": "^12.0",
-        "illuminate/support": "^12.0"
+        "php": "^8.3",
+        "illuminate/cache": "^13.0",
+        "illuminate/support": "^13.0"
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.64",
         "larastan/larastan": "^3.0",
-        "orchestra/testbench": "^10.0",
-        "pestphp/pest": "^3.0",
-        "pestphp/pest-plugin-laravel": "^3.0",
+        "orchestra/testbench": "^11.0",
+        "pestphp/pest": "^4.0",
+        "pestphp/pest-plugin-laravel": "^4.0",
         "rajmundtoth0/phpstan-forbidden": "^1.1",
         "phpstan/phpstan": "^2.1"
     },

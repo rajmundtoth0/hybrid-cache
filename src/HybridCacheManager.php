@@ -76,6 +76,23 @@ final class HybridCacheManager
         return $this->persistEnvelope($key, $this->payloadKey($key), $envelope, $now);
     }
 
+    public function touch(string $key, int $seconds): bool
+    {
+        if ($seconds <= 0) {
+            return $this->forget($key);
+        }
+
+        // Use the authoritative value so an outdated local copy cannot overwrite it.
+        $envelope = $this->distributedEnvelope($this->payloadKey($key));
+
+        if ($envelope === null) {
+            return false;
+        }
+
+        // Reset the envelope's timestamps as well as the underlying stores' TTLs.
+        return $this->put($key, $envelope->value, $seconds);
+    }
+
     public function increment(string $key, int $value = 1): int|bool
     {
         $current = $this->get($key, 0);
