@@ -36,6 +36,20 @@ final class HybridCacheRefresherService
         return $this->manager->syncLocal($key, $digest);
     }
 
+    /**
+     * Write only the distributed version; per-node HTTP sync will populate APCu.
+     */
+    public function publishKey(string $key): RefreshResult
+    {
+        $definition = $this->definitionForKey($key);
+
+        if ($definition === null) {
+            return RefreshResult::notFound("No refresher configured for key [{$key}].", ['key' => $key]);
+        }
+
+        return $this->refreshUsingDefinition($key, $definition, true);
+    }
+
     public function refreshKey(string $key): RefreshResult
     {
         $definition = $this->definitionForKey($key);
@@ -215,7 +229,7 @@ final class HybridCacheRefresherService
     /**
      * @param array<string, mixed> $definition
      */
-    private function refreshUsingDefinition(string $key, array $definition): RefreshResult
+    private function refreshUsingDefinition(string $key, array $definition, bool $publishOnly = false): RefreshResult
     {
         $handler = $definition['handler'] ?? null;
 
@@ -227,12 +241,9 @@ final class HybridCacheRefresherService
         $ttl = $this->normalizeTtl($definition['ttl'] ?? $this->defaultTtl(), 'ttl', $key);
         $staleTtl = $this->normalizeOptionalTtl($definition['stale_ttl'] ?? null, 'stale_ttl', $key);
 
-        return $this->manager->refreshPayload(
-            key: $key,
-            builder: $builder,
-            ttl: $ttl,
-            staleTtl: $staleTtl,
-        );
+        return $publishOnly
+            ? $this->manager->publishPayload($key, $builder, $ttl, $staleTtl)
+            : $this->manager->refreshPayload($key, $builder, $ttl, $staleTtl);
     }
 
     /**
