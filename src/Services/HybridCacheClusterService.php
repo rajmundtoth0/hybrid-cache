@@ -124,7 +124,8 @@ final class HybridCacheClusterService
         }
 
         // Origins only: no paths, query parameters, embedded credentials or fragments.
-        return ! isset($parts['user'], $parts['pass'])
+        return ! isset($parts['user'])
+            && ! isset($parts['pass'])
             && ! isset($parts['path'])
             && ! isset($parts['query'])
             && ! isset($parts['fragment']);
