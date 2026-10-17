@@ -30,7 +30,7 @@ final class HybridCacheClusterService
     {
         // Publish exactly once; node sync calls do not rebuild or contend for
         // the distributed refresh lock.
-        $published = $this->refresher->refreshKey($key);
+        $published = $this->refresher->publishKey($key);
 
         if ($published->status !== StatusEnum::REFRESHED->value) {
             return $published;
@@ -41,6 +41,10 @@ final class HybridCacheClusterService
 
     public function syncNodes(string $key): RefreshResult
     {
+        if (! (bool) $this->config->get('hybrid-cache.refresh.http.enabled', false)) {
+            return RefreshResult::invalid('Enable refresh.http.enabled for signed node synchronization.');
+        }
+
         $nodes = $this->config->get('hybrid-cache.refresh.http.nodes', []);
 
         if (! is_array($nodes) || $nodes === []) {
