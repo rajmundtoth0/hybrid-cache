@@ -27,15 +27,17 @@ final class HybridCacheRefreshCommand extends Command
         $group = $this->stringOption($this->option('group'));
         $refreshKeys = (bool) $this->option('all');
 
-        if ((bool) $this->option('cluster') && ($key === null || $prefix !== null || $group !== null || $refreshKeys)) {
-            $this->error('--cluster requires exactly one cache key (no --prefix, --group or --all).');
+        if ((bool) $this->option('cluster')) {
+            if ($key === null || $prefix !== null || $group !== null || $refreshKeys) {
+                $this->error('--cluster requires exactly one cache key (no --prefix, --group or --all).');
 
-            return self::FAILURE;
+                return self::FAILURE;
+            }
+
+            $result = $cluster->refreshAndSyncKey($key);
+        } else {
+            $result = $refresher->refreshCommand($key, $prefix, $group, $refreshKeys);
         }
-
-        $result = (bool) $this->option('cluster')
-            ? $cluster->refreshAndSyncKey($key)
-            : $refresher->refreshCommand($key, $prefix, $group, $refreshKeys);
 
         $output = $result->message;
 
