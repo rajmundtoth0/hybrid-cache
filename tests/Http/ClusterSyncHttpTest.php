@@ -19,7 +19,11 @@ it('hydrates APCu from the shared value over signed HTTP without invoking a buil
     config()->set('hybrid-cache.refresh.keys', [
         'node:key' => [
             'coordinated' => true,
-            'handler' => function () use (&$builds): string { $builds++; return 'unexpected'; },
+            'handler' => function () use (&$builds): string {
+                $builds++;
+
+                return 'unexpected';
+            },
             'ttl' => 60,
         ],
     ]);
