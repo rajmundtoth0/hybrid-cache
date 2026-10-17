@@ -245,6 +245,26 @@ final class HybridCacheManager
      * Identifier of the published, still-fresh distributed payload.
      * Used by the fan-out coordinator to tie acknowledgements to a snapshot.
      */
+    /**
+     * Build the shared version exactly once, without touching the publisher's
+     * local APCu (the publisher may be a CLI process with a different pool).
+     */
+    public function publishPayload(
+        string $key,
+        Closure $builder,
+        int|DateInterval|DateTimeInterface $ttl,
+        int|DateInterval|DateTimeInterface|null $staleTtl = null,
+    ): RefreshResult {
+        return $this->performRefresh(
+            key: $key,
+            builder: $builder,
+            ttl: $ttl,
+            staleTtl: $staleTtl,
+            coordinated: $this->usesCoordinatedStorage($key),
+            hydrateLocal: false,
+        );
+    }
+
     public function distributedDigest(string $key): ?string
     {
         $envelope = $this->distributedEnvelope($this->payloadKey($key));
@@ -355,6 +375,7 @@ final class HybridCacheManager
         int|DateInterval|DateTimeInterface $ttl,
         int|DateInterval|DateTimeInterface|null $staleTtl,
         bool $coordinated,
+        bool $hydrateLocal = true,
     ): RefreshResult {
         $payloadKey = $this->payloadKey($key);
         $lockKey = $this->lockService->lockKey($key);
@@ -370,7 +391,7 @@ final class HybridCacheManager
             $now = time();
 
             $distributed = $this->distributedStore();
-            $local = $this->usesSingleStore() ? null : $this->localStore();
+            $local = $this->usesSingleStore() || ! $hydrateLocal ? null : $this->localStore();
 
             $envelope = CacheEnvelope::fresh($builder(), $freshTtl, $staleWindow, $now);
             $ttlSeconds = max(1, $envelope->secondsUntilExpiry($now));
