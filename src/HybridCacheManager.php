@@ -241,6 +241,79 @@ final class HybridCacheManager
         );
     }
 
+    /**
+     * Identifier of the published, still-fresh distributed payload.
+     * Used by the fan-out coordinator to tie acknowledgements to a snapshot.
+     */
+    public function distributedDigest(string $key): ?string
+    {
+        $envelope = $this->distributedEnvelope($this->payloadKey($key));
+
+        if ($envelope === null || ! $envelope->isFresh(time())) {
+            return null;
+        }
+
+        return hash('sha256', serialize($envelope->toArray()));
+    }
+
+    /**
+     * Hydrate ONLY this node's local cache from the already-published payload.
+     * Does not run a builder or acquire the shared rebuild lock. Coordinated
+     * keys populate the inactive APCu slot before switching the local pointer.
+     *
+     * An expected digest protects against delayed fan-out of superseded writes.
+     */
+    public function syncLocal(string $key, ?string $expectedDigest = null): RefreshResult
+    {
+        if ($this->usesSingleStore()) {
+            return RefreshResult::noop('Local and distributed stores are the same.', ['key' => $key]);
+        }
+
+        $payloadKey = $this->payloadKey($key);
+        $now = time();
+        $envelope = $this->distributedEnvelope($payloadKey);
+
+        if ($envelope === null || ! $envelope->isFresh($now)) {
+            return RefreshResult::notFound('No fresh distributed payload to hydrate.', ['key' => $key]);
+        }
+
+        $digest = hash('sha256', serialize($envelope->toArray()));
+
+        if ($expectedDigest !== null && ! hash_equals($expectedDigest, $digest)) {
+            return RefreshResult::failed($key, 'Published payload has been superseded; retry with the current digest.');
+        }
+
+        $localStore = $this->localStore();
+        $ttl = $envelope->secondsUntilExpiry($now);
+        $slot = null;
+
+        try {
+            if ($this->usesCoordinatedStorage($key)) {
+                $slot = $this->localCache->persistRefreshedEnvelope($localStore, $payloadKey, $envelope, $ttl);
+
+                if ($slot === null) {
+                    return RefreshResult::failed($key, 'Could not promote local cache slot.');
+                }
+            } elseif (! $this->localCache->persistEnvelope($localStore, $payloadKey, $envelope, $ttl, false)) {
+                return RefreshResult::failed($key, 'Could not hydrate local cache.');
+            }
+
+            // A concurrent publication may have replaced the payload mid-sync.
+            // Do not acknowledge an older revision as a successful cluster sync.
+            if ($this->distributedDigest($key) !== $digest) {
+                return RefreshResult::failed($key, 'Distributed payload changed during local sync; retry.');
+            }
+
+            return RefreshResult::ok('Local cache synchronized.', array_filter([
+                'key' => $key,
+                'digest' => $digest,
+                'slot' => $slot,
+            ], static fn (mixed $value): bool => $value !== null));
+        } catch (\Throwable $error) {
+            return RefreshResult::failed($key, $error->getMessage());
+        }
+    }
+
     public function groupVersion(string $group): int
     {
         $value = $this->distributedStore()->get($this->groupVersionKey($group));
