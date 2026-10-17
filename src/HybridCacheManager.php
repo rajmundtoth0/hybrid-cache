@@ -285,10 +285,7 @@ final class HybridCacheManager
      */
     public function syncLocal(string $key, ?string $expectedDigest = null): RefreshResult
     {
-        if ($this->usesSingleStore()) {
-            return RefreshResult::noop('Local and distributed stores are the same.', ['key' => $key]);
-        }
-
+        $singleStore = $this->usesSingleStore();
         $payloadKey = $this->payloadKey($key);
         $now = time();
         $envelope = $this->distributedEnvelope($payloadKey);
@@ -301,6 +298,13 @@ final class HybridCacheManager
 
         if ($expectedDigest !== null && ! hash_equals($expectedDigest, $digest)) {
             return RefreshResult::failed($key, 'Published payload has been superseded; retry with the current digest.');
+        }
+
+        if ($singleStore) {
+            return RefreshResult::ok('Distributed store is the local store.', [
+                'key' => $key,
+                'digest' => $digest,
+            ]);
         }
 
         $localStore = $this->localStore();
