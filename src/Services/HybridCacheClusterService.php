@@ -66,8 +66,8 @@ final class HybridCacheClusterService
             absolute: false,
         );
 
-        $attempts = max(1, min(5, (int) $this->config->get('hybrid-cache.refresh.http.sync_attempts', 3)));
-        $timeout = max(1, min(15, (int) $this->config->get('hybrid-cache.refresh.http.sync_timeout_seconds', 3)));
+        $attempts = $this->intConfig('sync_attempts', 3, 1, 5);
+        $timeout = $this->intConfig('sync_timeout_seconds', 3, 1, 15);
         $allowHttp = (bool) $this->config->get('hybrid-cache.refresh.http.allow_insecure_http', false);
         $results = [];
         $failed = false;
@@ -92,6 +92,7 @@ final class HybridCacheClusterService
                     if ($response->successful()
                         && is_array($body)
                         && ($body['status'] ?? null) === StatusEnum::REFRESHED->value
+                        && is_array($body['data'] ?? null)
                         && ($body['data']['digest'] ?? null) === $digest) {
                         $results[$node] = 'acknowledged';
                         break;
@@ -113,6 +114,13 @@ final class HybridCacheClusterService
         return $failed
             ? new RefreshResult(StatusEnum::FAILED->value, 'Some nodes did not acknowledge the published value.', $data)
             : RefreshResult::ok('All configured nodes acknowledged the published value.', $data);
+    }
+
+    private function intConfig(string $name, int $default, int $min, int $max): int
+    {
+        $value = $this->config->get('hybrid-cache.refresh.http.'.$name, $default);
+
+        return max($min, min($max, is_int($value) ? $value : $default));
     }
 
     private function validNodeOrigin(string $origin, bool $allowHttp): bool
