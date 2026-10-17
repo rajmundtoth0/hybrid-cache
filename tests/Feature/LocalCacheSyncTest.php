@@ -65,3 +65,20 @@ it('rejects missing or expired shared payloads and unregistered HTTP sync keys',
         ->and(app(HybridCacheRefresherService::class)->syncLocalKey('missing', str_repeat('b', 64))->status)
         ->toBe(StatusEnum::NOT_FOUND->value);
 });
+
+it('publishes to distributed cache without hydrating the CLI local store', function (): void {
+    config()->set('hybrid-cache.refresh.keys', [
+        'cluster:publish' => [
+            'handler' => fn (): string => 'published-once',
+            'ttl' => 60,
+            'coordinated' => true,
+        ],
+    ]);
+
+    $result = app(HybridCacheRefresherService::class)->publishKey('cluster:publish');
+
+    expect($result->status)->toBe(StatusEnum::REFRESHED->value)
+        ->and(Cache::store('distributed-array')->get('hybrid-cache:cluster:publish')['value'])->toBe('published-once')
+        ->and(Cache::store('local-array')->get('hybrid-cache:cluster:publish'))->toBeNull()
+        ->and(Cache::store('local-array')->get('hybrid-cache:cluster:publish:active'))->toBeNull();
+});
