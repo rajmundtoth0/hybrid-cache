@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use rajmundtoth0\HybridCache\Console\HybridCacheRefreshCommand;
 use rajmundtoth0\HybridCache\Http\HybridCacheRefreshController;
+use rajmundtoth0\HybridCache\Http\HybridCacheSyncController;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
 use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
 use rajmundtoth0\HybridCache\Services\HybridCacheRefresherService;
@@ -70,6 +71,12 @@ final class HybridCacheServiceProvider extends ServiceProvider
         Route::post($this->refreshHttpPath(), HybridCacheRefreshController::class)
             ->middleware($middleware)
             ->name('hybrid-cache.refresh');
+
+        // Separate internal endpoint for node-local hydration; never rebuild.
+        // Relative signatures allow each node to have a different trusted host.
+        Route::post($this->refreshSyncPath(), HybridCacheSyncController::class)
+            ->middleware(['signed:relative', 'throttle:60,1'])
+            ->name('hybrid-cache.sync');
     }
 
     /**
@@ -113,6 +120,13 @@ final class HybridCacheServiceProvider extends ServiceProvider
         $value = $this->app->make('config')->get('hybrid-cache.refresh.http.enabled', false);
 
         return (bool) $value;
+    }
+
+    private function refreshSyncPath(): string
+    {
+        $path = $this->app->make('config')->get('hybrid-cache.refresh.http.sync_path', '/hybrid-cache/sync');
+
+        return is_string($path) && $path !== '' ? $path : '/hybrid-cache/sync';
     }
 
     private function refreshHttpPath(): string
