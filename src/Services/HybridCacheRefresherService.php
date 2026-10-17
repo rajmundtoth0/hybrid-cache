@@ -23,6 +23,19 @@ final class HybridCacheRefresherService
     ) {
     }
 
+    /**
+     * Signed node-local sync: hydrate an already-published distributed value.
+     * Never invokes the configured builder or acquires the global rebuild lock.
+     */
+    public function syncLocalKey(string $key, string $digest): RefreshResult
+    {
+        if ($this->definitionForKey($key) === null) {
+            return RefreshResult::notFound("No refresher configured for key [{$key}].", ['key' => $key]);
+        }
+
+        return $this->manager->syncLocal($key, $digest);
+    }
+
     public function refreshKey(string $key): RefreshResult
     {
         $definition = $this->definitionForKey($key);
