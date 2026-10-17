@@ -112,3 +112,23 @@ it('refuses cluster mode without configured nodes and without a published payloa
     config()->set('hybrid-cache.refresh.http.nodes', ['a' => 'https://a.internal']);
     expect($cluster->syncNodes('no-key')->status)->toBe(StatusEnum::NOT_FOUND->value);
 });
+
+it('rejects request-body substitutions for the signed query key', function (): void {
+    config()->set('hybrid-cache.refresh.keys', [
+        'signed:key' => ['handler' => fn (): string => 'unused', 'ttl' => 60],
+    ]);
+    Cache::store('distributed-array')->put(
+        'hybrid-cache:signed:key',
+        CacheEnvelope::fresh('trusted', 60, 0, time())->toArray(),
+        60,
+    );
+    $digest = app(HybridCacheManager::class)->distributedDigest('signed:key');
+    $url = URL::signedRoute('hybrid-cache.sync', ['key' => 'signed:key', 'digest' => $digest], absolute: false);
+
+    $this->postJson($url, ['key' => 'unsigned:key', 'digest' => str_repeat('f', 64)])
+        ->assertStatus(200)
+        ->assertJsonPath('data.key', 'signed:key');
+
+    expect(Cache::store('local-array')->get('hybrid-cache:signed:key')['value'])->toBe('trusted')
+        ->and(Cache::store('local-array')->get('hybrid-cache:unsigned:key'))->toBeNull();
+});
