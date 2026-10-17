@@ -23,6 +23,16 @@ return [
                 'signed',
                 'throttle:60,1',
             ],
+            // POST /hybrid-cache/sync uses signed:relative and hydrates the local
+            // APCu cache without rebuilding distributed state. Enabled only when
+            // refresh.http.enabled is true.
+            'sync_path' => env('HYBRID_CACHE_SYNC_PATH', '/hybrid-cache/sync'),
+            // Trusted origins for direct per-node delivery; exclude load balancers.
+            // Example: ['app-a' => 'https://app-a.internal', 'app-b' => 'https://app-b.internal']
+            'nodes' => [],
+            'sync_attempts' => 3,
+            'sync_timeout_seconds' => 3,
+            'allow_insecure_http' => false,
         ],
 
         /**

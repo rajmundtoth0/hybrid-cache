@@ -289,6 +289,83 @@ php artisan hybrid-cache:refresh dashboard:stats
 php artisan hybrid-cache:refresh --group=dashboard --all
 ```
 
+### Opt-in multi-server warm synchronization
+
+The standard signed `/hybrid-cache/refresh` endpoint refreshes **one receiving
+node**. Its distributed rebuild lock prevents duplicate builders, but it does
+not populate the APCu memory of every web server automatically.
+
+For a cluster, a separate publisher can build the **distributed** snapshot
+once, then ask each **PHP-FPM node** to copy that published snapshot into its
+own local APCu. No node runs the builder again:
+
+```text
+writer / queue worker → publish (shared Valkey payload)
+                       → signed POST /hybrid-cache/sync on node A → local APCu
+                       → signed POST /hybrid-cache/sync on node B → local APCu
+                       → signed POST /hybrid-cache/sync on node C → local APCu
+```
+
+Configure each node's *direct* HTTPS origin, not an application load balancer,
+and enable the signed HTTP interface on **every** participating instance:
+
+```php
+// config/hybrid-cache.php
+'refresh' => [
+    'http' => [
+        'enabled' => true,
+        'nodes' => [
+            'web-a' => 'https://web-a.internal',
+            'web-b' => 'https://web-b.internal',
+        ],
+    ],
+    'keys' => [
+        'dashboard:stats' => [
+            'handler' => [\App\Cache\DashboardStats::class, 'build'],
+            'ttl' => 300,
+            'stale_ttl' => 60,
+            'coordinated' => true,
+        ],
+    ],
+],
+```
+
+All nodes must share the same signing key (`APP_KEY`), trusted route
+configuration, cache prefix and distributed store. Internal node URLs must
+route directly to the **serving FPM pool**: a separate PHP CLI process does
+not share its APCu. HTTP origins are rejected unless explicitly allowed with
+`refresh.http.allow_insecure_http = true`; this opt-in is only for trusted
+internal development networks. Keep the signed endpoints inaccessible from
+untrusted networks.
+
+Publish and synchronize one registered key:
+
+```bash
+php artisan hybrid-cache:refresh dashboard:stats --cluster
+```
+
+Or invoke `app(\rajmundtoth0\HybridCache\Services\HybridCacheClusterService::class)->refreshAndSyncKey('dashboard:stats')`
+from trusted application code. To retry nodes after a successful publish,
+call `syncNodes('dashboard:stats')` without rebuilding the value.
+
+The caller sends a **relative signed** URL with the requested key and digest.
+Each node reads the authoritative fresh distributed envelope, writes the
+inactive local slot for coordinated keys, promotes it, and acknowledges the
+digest it actually synchronized. A duplicate notification safely hydrates
+the same payload again. The dispatcher retries each node a bounded number of
+times and returns per-node acknowledgement/failure details; partial failure
+is reported as a failure, **not** cluster success.
+
+**Consistency limits:** delivery is synchronous and best-effort; it is *not*
+a durable queue or atomic cluster-wide cutover. A process crash, disconnected
+node, overlapping write or freshly started node can leave local copies behind.
+Nodes can continue serving previously cached values while propagation is in
+progress. Re-run `syncNodes` or use a durable retry/reconciliation job in
+production, and use bounded TTLs. For strict cross-node freshness, an
+additional shared-version check, fencing or acknowledgement/barrier protocol
+is necessary (and adds read-path or coordination overhead). This mechanism
+does not make local caching magically strongly consistent.
+
 ### Optional group versions
 
 You can use group versions to implement **lazy group refresh** without wildcard deletion:
