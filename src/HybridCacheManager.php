@@ -519,12 +519,56 @@ final class HybridCacheManager
         $fromDistributed = $this->awaitDistributedPayload($payloadKey);
 
         if ($fromDistributed === null) {
-            return $this->storeFreshPayload($key, $payloadKey, $callback, $freshTtl, $staleWindow);
+            return $this->storeUnlockedPayload($key, $payloadKey, $callback, $freshTtl, $staleWindow, $activeSlot, $coordinated);
         }
 
-        $this->localCache->hydrateEnvelope($this->localStore(), $payloadKey, $fromDistributed, time(), $activeSlot, $coordinated);
+        // In single-store mode the polled payload is already the only copy;
+        // writing it back without the lock could replace a newer publish.
+        if (! $this->usesSingleStore()) {
+            $this->localCache->hydrateEnvelope($this->localStore(), $payloadKey, $fromDistributed, time(), $activeSlot, $coordinated);
+        }
 
         return $fromDistributed;
+    }
+
+    /**
+     * Builds without the refresh lock once the wait for its holder ran out. The
+     * distributed write only succeeds while the key is still absent, so a slow
+     * unlocked build can never replace a payload that the lock holder or a
+     * publisher stored meanwhile; that payload is served instead.
+     */
+    private function storeUnlockedPayload(
+        string $key,
+        string $payloadKey,
+        Closure $callback,
+        int $freshTtl,
+        int $staleWindow,
+        ?string $activeSlot,
+        bool $coordinated,
+    ): CacheEnvelope {
+        $now = time();
+        $envelope = CacheEnvelope::fresh($callback(), $freshTtl, $staleWindow, $now);
+        $ttl = max(1, $envelope->secondsUntilExpiry($now));
+
+        if ($this->distributedStore()->add($payloadKey, $envelope->toArray(), $ttl)) {
+            if (! $this->usesSingleStore()) {
+                $this->localCache->persistEnvelope($this->localStore(), $payloadKey, $envelope, $ttl, $this->usesCoordinatedStorage($key));
+            }
+
+            return $envelope;
+        }
+
+        $stored = $this->distributedEnvelope($payloadKey);
+
+        if ($stored === null) {
+            return $envelope;
+        }
+
+        if (! $this->usesSingleStore()) {
+            $this->localCache->hydrateEnvelope($this->localStore(), $payloadKey, $stored, time(), $activeSlot, $coordinated);
+        }
+
+        return $stored;
     }
 
     private function storeFreshPayload(string $key, string $payloadKey, Closure $callback, int $freshTtl, int $staleWindow): CacheEnvelope
