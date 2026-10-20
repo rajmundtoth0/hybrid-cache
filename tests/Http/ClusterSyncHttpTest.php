@@ -183,3 +183,42 @@ it('fails instead of reporting already refreshing when the publish wait runs out
     Http::assertNothingSent();
     $this->artisan('hybrid-cache:refresh catalog:held --cluster')->assertExitCode(1);
 });
+
+it('synchronizes only the requested nodes and reports per-node details', function (): void {
+    config()->set('hybrid-cache.refresh.http.nodes', [
+        'a' => 'https://a.internal',
+        'b' => 'https://b.internal',
+    ]);
+    Cache::store('distributed-array')->put('hybrid-cache:catalog:subset', CacheEnvelope::fresh('v1', 60, 0, time())->toArray(), 60);
+    Http::fake(function ($request) {
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+        return Http::response(['status' => 'refreshed', 'data' => ['digest' => $query['digest']]], 200);
+    });
+
+    $result = app(HybridCacheClusterService::class)->syncNodes('catalog:subset', ['b', 'missing']);
+
+    expect($result->data['nodes'])->toBe(['b' => 'acknowledged', 'missing' => 'invalid_node_configuration'])
+        ->and($result->data['details']['b']['attempts'])->toBe(1)
+        ->and($result->data['details']['b']['http_status'])->toBe(200)
+        ->and($result->data['details']['b']['reason'])->toBeNull()
+        ->and($result->data['details']['b']['acknowledged_at'])->toBeFloat()
+        ->and($result->data['details']['missing']['attempts'])->toBe(0);
+    Http::assertSentCount(1);
+    Http::assertSent(fn ($request) => str_contains($request->url(), 'b.internal'));
+});
+
+it('does not retry a node that reports the digest as superseded', function (): void {
+    config()->set('hybrid-cache.refresh.http.nodes', ['a' => 'https://a.internal']);
+    config()->set('hybrid-cache.refresh.http.sync_attempts', 3);
+    Cache::store('distributed-array')->put('hybrid-cache:catalog:superseded', CacheEnvelope::fresh('v1', 60, 0, time())->toArray(), 60);
+    Http::fake(fn () => Http::response(['status' => 'failed', 'data' => ['reason' => 'superseded']], 500));
+
+    $result = app(HybridCacheClusterService::class)->syncNodes('catalog:superseded');
+
+    expect($result->data['nodes'])->toBe(['a' => 'rejected'])
+        ->and($result->data['details']['a']['reason'])->toBe('superseded')
+        ->and($result->data['details']['a']['attempts'])->toBe(1)
+        ->and($result->data['details']['a']['http_status'])->toBe(500);
+    Http::assertSentCount(1);
+});
