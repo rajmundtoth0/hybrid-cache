@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use Illuminate\Cache\Events\KeyWritten;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
 use rajmundtoth0\HybridCache\CacheEnvelope;
 use rajmundtoth0\HybridCache\HybridCacheManager;
 use rajmundtoth0\HybridCache\Enum\StatusEnum;
@@ -43,6 +45,7 @@ it('refuses a delayed sync for a superseded published value', function (): void 
     $result = $manager->syncLocal('cluster:superseded', str_repeat('a', 64));
 
     expect($result->status)->toBe(StatusEnum::FAILED->value)
+        ->and($result->data['reason'])->toBe('superseded')
         ->and(Cache::store('local-array')->get($key))->toBeNull();
 });
 
@@ -62,6 +65,7 @@ it('rejects missing or expired shared payloads and unregistered HTTP sync keys',
     $manager = app(HybridCacheManager::class);
 
     expect($manager->syncLocal('missing')->status)->toBe(StatusEnum::NOT_FOUND->value)
+        ->and($manager->syncLocal('missing')->data['reason'])->toBe('no_fresh_payload')
         ->and(app(HybridCacheRefresherService::class)->syncLocalKey('missing', str_repeat('b', 64))->status)
         ->toBe(StatusEnum::NOT_FOUND->value);
 });
@@ -81,4 +85,57 @@ it('publishes to distributed cache without hydrating the CLI local store', funct
         ->and(Cache::store('distributed-array')->get('hybrid-cache:cluster:publish')['value'])->toBe('published-once')
         ->and(Cache::store('local-array')->get('hybrid-cache:cluster:publish'))->toBeNull()
         ->and(Cache::store('local-array')->get('hybrid-cache:cluster:publish:active'))->toBeNull();
+});
+
+it('evicts a local copy written for a payload superseded during sync', function (): void {
+    $manager = app(HybridCacheManager::class);
+    $key = 'hybrid-cache:cluster:raced';
+    Cache::store('distributed-array')->put($key, CacheEnvelope::fresh('old', 60, 0, time())->toArray(), 60);
+    $digest = $manager->distributedDigest('cluster:raced');
+    $published = false;
+
+    // A newer publication (and its own node sync) lands right after this
+    // older sync writes the local copy; the older copy must not survive it.
+    Event::listen(KeyWritten::class, function (KeyWritten $event) use ($key, &$published): void {
+        if ($published || $event->storeName !== 'local-array' || $event->key !== $key) {
+            return;
+        }
+
+        $published = true;
+        Cache::store('distributed-array')->put($key, CacheEnvelope::fresh('new', 60, 0, time())->toArray(), 60);
+    });
+
+    $result = $manager->syncLocal('cluster:raced', $digest);
+
+    expect($result->status)->toBe(StatusEnum::FAILED->value)
+        ->and($result->data['reason'])->toBe('changed_during_sync')
+        ->and($published)->toBeTrue()
+        ->and(Cache::store('local-array')->get($key))->toBeNull()
+        ->and($manager->flexible('cluster:raced', 60, fn (): string => 'rebuilt'))->toBe('new');
+});
+
+it('evicts a promoted coordinated slot superseded during sync', function (): void {
+    config()->set('hybrid-cache.refresh.keys', [
+        'cluster:raced-slot' => ['coordinated' => true, 'handler' => fn (): string => 'builder-should-not-run'],
+    ]);
+
+    $manager = app(HybridCacheManager::class);
+    $key = 'hybrid-cache:cluster:raced-slot';
+    Cache::store('distributed-array')->put($key, CacheEnvelope::fresh('old', 60, 0, time())->toArray(), 60);
+    $digest = $manager->distributedDigest('cluster:raced-slot');
+
+    // Supersede the payload after the older sync has flipped the local pointer.
+    Event::listen(KeyWritten::class, function (KeyWritten $event) use ($key): void {
+        if ($event->storeName === 'local-array' && $event->key === $key.':active') {
+            Cache::store('distributed-array')->put($key, CacheEnvelope::fresh('new', 60, 0, time())->toArray(), 60);
+        }
+    });
+
+    $result = $manager->syncLocal('cluster:raced-slot', $digest);
+
+    expect($result->status)->toBe(StatusEnum::FAILED->value)
+        ->and(Cache::store('local-array')->get($key.':active'))->toBeNull()
+        ->and(Cache::store('local-array')->get($key.':slot:a'))->toBeNull()
+        ->and(Cache::store('local-array')->get($key.':slot:b'))->toBeNull()
+        ->and($manager->flexible('cluster:raced-slot', 60, fn (): string => 'rebuilt'))->toBe('new');
 });

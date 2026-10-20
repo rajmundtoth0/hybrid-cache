@@ -291,13 +291,13 @@ final class HybridCacheManager
         $envelope = $this->distributedEnvelope($payloadKey);
 
         if ($envelope === null || ! $envelope->isFresh($now)) {
-            return RefreshResult::notFound('No fresh distributed payload to hydrate.', ['key' => $key]);
+            return RefreshResult::notFound('No fresh distributed payload to hydrate.', ['key' => $key, 'reason' => 'no_fresh_payload']);
         }
 
         $digest = hash('sha256', serialize($envelope->toArray()));
 
         if ($expectedDigest !== null && ! hash_equals($expectedDigest, $digest)) {
-            return RefreshResult::failed($key, 'Published payload has been superseded; retry with the current digest.');
+            return RefreshResult::failed($key, 'Published payload has been superseded; retry with the current digest.', 'superseded');
         }
 
         if ($singleStore) {
@@ -316,16 +316,21 @@ final class HybridCacheManager
                 $slot = $this->localCache->persistRefreshedEnvelope($localStore, $payloadKey, $envelope, $ttl);
 
                 if ($slot === null) {
-                    return RefreshResult::failed($key, 'Could not promote local cache slot.');
+                    return RefreshResult::failed($key, 'Could not promote local cache slot.', 'local_write_failed');
                 }
             } elseif (! $this->localCache->persistEnvelope($localStore, $payloadKey, $envelope, $ttl, false)) {
-                return RefreshResult::failed($key, 'Could not hydrate local cache.');
+                return RefreshResult::failed($key, 'Could not hydrate local cache.', 'local_write_failed');
             }
 
             // A concurrent publication may have replaced the payload mid-sync.
-            // Do not acknowledge an older revision as a successful cluster sync.
+            // Do not acknowledge an older revision as a successful cluster sync,
+            // and evict it: the newer sync may already have written and been
+            // acknowledged on this node, and this write may have replaced it.
+            // The next read rehydrates from the authoritative distributed store.
             if ($this->distributedDigest($key) !== $digest) {
-                return RefreshResult::failed($key, 'Distributed payload changed during local sync; retry.');
+                $this->localCache->forgetEnvelope($localStore, $payloadKey);
+
+                return RefreshResult::failed($key, 'Distributed payload changed during local sync; retry.', 'changed_during_sync');
             }
 
             return RefreshResult::ok('Local cache synchronized.', array_filter([
@@ -334,7 +339,7 @@ final class HybridCacheManager
                 'slot' => $slot,
             ], static fn (mixed $value): bool => $value !== null));
         } catch (\Throwable $error) {
-            return RefreshResult::failed($key, $error->getMessage());
+            return RefreshResult::failed($key, $error->getMessage(), 'exception');
         }
     }
 
