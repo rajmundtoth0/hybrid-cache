@@ -242,18 +242,20 @@ final class HybridCacheManager
     }
 
     /**
-     * Identifier of the published, still-fresh distributed payload.
-     * Used by the fan-out coordinator to tie acknowledgements to a snapshot.
-     */
-    /**
      * Build the shared version exactly once, without touching the publisher's
      * local APCu (the publisher may be a CLI process with a different pool).
+     *
+     * A publish follows a change to the source data, so with $waitSeconds > 0 it
+     * waits for a builder already holding the refresh lock instead of skipping:
+     * that build may have read the data before the change. If the wait runs out
+     * nothing is published and the result is FAILED, never already_refreshing.
      */
     public function publishPayload(
         string $key,
         Closure $builder,
         int|DateInterval|DateTimeInterface $ttl,
         int|DateInterval|DateTimeInterface|null $staleTtl = null,
+        int $waitSeconds = 0,
     ): RefreshResult {
         return $this->performRefresh(
             key: $key,
@@ -262,9 +264,14 @@ final class HybridCacheManager
             staleTtl: $staleTtl,
             coordinated: $this->usesCoordinatedStorage($key),
             hydrateLocal: false,
+            waitSeconds: $waitSeconds,
         );
     }
 
+    /**
+     * Identifier of the published, still-fresh distributed payload.
+     * Used by the fan-out coordinator to tie acknowledgements to a snapshot.
+     */
     public function distributedDigest(string $key): ?string
     {
         $envelope = $this->distributedEnvelope($this->payloadKey($key));
@@ -385,13 +392,16 @@ final class HybridCacheManager
         int|DateInterval|DateTimeInterface|null $staleTtl,
         bool $coordinated,
         bool $hydrateLocal = true,
+        int $waitSeconds = 0,
     ): RefreshResult {
         $payloadKey = $this->payloadKey($key);
         $lockKey = $this->lockService->lockKey($key);
-        $release = $this->lockService->acquireRefreshLock($lockKey);
+        $release = $this->lockService->acquireRefreshLock($lockKey, waitSeconds: $waitSeconds);
 
         if ($release === null) {
-            return RefreshResult::alreadyRefreshing($key);
+            return $waitSeconds > 0
+                ? RefreshResult::failed($key, 'Timed out waiting for the refresh lock; nothing was published.', 'lock_timeout')
+                : RefreshResult::alreadyRefreshing($key);
         }
 
         try {

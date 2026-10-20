@@ -38,6 +38,9 @@ final class HybridCacheRefresherService
 
     /**
      * Write only the distributed version; per-node HTTP sync will populate APCu.
+     * Waits up to refresh.publish_wait_seconds for a builder already holding the
+     * refresh lock, then builds again: the in-flight build may predate the change
+     * being published. FAILED (reason lock_timeout) if the wait runs out.
      */
     public function publishKey(string $key): RefreshResult
     {
@@ -242,7 +245,7 @@ final class HybridCacheRefresherService
         $staleTtl = $this->normalizeOptionalTtl($definition['stale_ttl'] ?? null, 'stale_ttl', $key);
 
         return $publishOnly
-            ? $this->manager->publishPayload($key, $builder, $ttl, $staleTtl)
+            ? $this->manager->publishPayload($key, $builder, $ttl, $staleTtl, $this->publishWaitSeconds())
             : $this->manager->refreshPayload($key, $builder, $ttl, $staleTtl);
     }
 
@@ -332,6 +335,13 @@ final class HybridCacheRefresherService
         }
 
         return $filtered === [] ? null : $filtered;
+    }
+
+    private function publishWaitSeconds(): int
+    {
+        $seconds = $this->config->get('hybrid-cache.refresh.publish_wait_seconds', $this->config->get('hybrid-cache.lock_ttl', 30));
+
+        return is_numeric($seconds) ? max(1, (int) $seconds) : 30;
     }
 
     private function defaultTtl(): int

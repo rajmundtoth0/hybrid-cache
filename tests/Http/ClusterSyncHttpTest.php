@@ -142,3 +142,44 @@ it('rejects request-body substitutions for the signed query key', function (): v
     expect(Cache::store('local-array')->get('hybrid-cache:signed:key')['value'])->toBe('trusted')
         ->and(Cache::store('local-array')->get('hybrid-cache:unsigned:key'))->toBeNull();
 });
+
+it('waits for an in-flight builder before publishing, then synchronizes', function (): void {
+    config()->set('hybrid-cache.refresh.publish_wait_seconds', 3);
+    config()->set('hybrid-cache.refresh.keys', [
+        'catalog:wait' => ['handler' => fn (): string => 'built after the commit', 'ttl' => 60],
+    ]);
+    config()->set('hybrid-cache.refresh.http.nodes', ['a' => 'https://a.internal']);
+    Http::fake(function ($request) {
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+        return Http::response(['status' => 'refreshed', 'data' => ['digest' => $query['digest']]], 200);
+    });
+
+    // Another builder holds the lock and may have read the data before the change.
+    Cache::store('distributed-array')->getStore()->lock('hybrid-cache:lock:catalog:wait', 1)->get();
+    $started = microtime(true);
+
+    $result = app(HybridCacheClusterService::class)->refreshAndSyncKey('catalog:wait');
+
+    expect($result->status)->toBe(StatusEnum::REFRESHED->value)
+        ->and(microtime(true) - $started)->toBeGreaterThan(0.5)
+        ->and(Cache::store('distributed-array')->get('hybrid-cache:catalog:wait')['value'])->toBe('built after the commit');
+});
+
+it('fails instead of reporting already refreshing when the publish wait runs out', function (): void {
+    config()->set('hybrid-cache.refresh.publish_wait_seconds', 1);
+    config()->set('hybrid-cache.refresh.keys', [
+        'catalog:held' => ['handler' => fn (): string => 'never built', 'ttl' => 60],
+    ]);
+    config()->set('hybrid-cache.refresh.http.nodes', ['a' => 'https://a.internal']);
+    Http::fake();
+    Cache::store('distributed-array')->getStore()->lock('hybrid-cache:lock:catalog:held', 30)->get();
+
+    $result = app(HybridCacheClusterService::class)->refreshAndSyncKey('catalog:held');
+
+    expect($result->status)->toBe(StatusEnum::FAILED->value)
+        ->and($result->data['reason'])->toBe('lock_timeout')
+        ->and(Cache::store('distributed-array')->get('hybrid-cache:catalog:held'))->toBeNull();
+    Http::assertNothingSent();
+    $this->artisan('hybrid-cache:refresh catalog:held --cluster')->assertExitCode(1);
+});

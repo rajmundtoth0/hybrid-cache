@@ -16,6 +16,10 @@ return [
     'refresh' => [
         'default_ttl' => (int) env('HYBRID_CACHE_REFRESH_TTL', 60),
 
+        // How long a publish (publishKey, refreshAndSyncKey, --cluster) waits for
+        // a builder already holding the refresh lock before failing.
+        'publish_wait_seconds' => (int) env('HYBRID_CACHE_PUBLISH_WAIT', 30),
+
         'http' => [
             'enabled' => (bool) env('HYBRID_CACHE_REFRESH_HTTP', false),
             'path' => env('HYBRID_CACHE_REFRESH_PATH', '/hybrid-cache/refresh'),
