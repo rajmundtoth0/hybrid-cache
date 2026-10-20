@@ -27,6 +27,14 @@ return [
             // APCu cache without rebuilding distributed state. Enabled only when
             // refresh.http.enabled is true.
             'sync_path' => env('HYBRID_CACHE_SYNC_PATH', '/hybrid-cache/sync'),
+            // signed:relative is always enforced and throttle:60,1 is added
+            // when no throttle is listed. Size the limit for the fan-out rate:
+            // nodes whose limiter uses a shared cache store also share one
+            // per-IP budget for the publisher, across all of them.
+            'sync_middleware' => [
+                'signed:relative',
+                'throttle:60,1',
+            ],
             // Trusted origins for direct per-node delivery; exclude load balancers.
             // Example: ['app-a' => 'https://app-a.internal', 'app-b' => 'https://app-b.internal']
             'nodes' => [],

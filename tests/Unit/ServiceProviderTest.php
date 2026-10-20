@@ -45,6 +45,21 @@ it('filters invalid middleware values and adds missing defaults', function (): v
     expect($method->invoke($provider))->toBe(['signed', 'throttle:60,1']);
 });
 
+it('always enforces relative signatures and a throttle on the sync route', function (): void {
+    $provider = new HybridCacheServiceProvider(app());
+    $method = new ReflectionMethod($provider, 'refreshSyncMiddleware');
+    $method->setAccessible(true);
+
+    config()->set('hybrid-cache.refresh.http.sync_middleware', ['signed', 'throttle:600,1', '', 42]);
+    expect($method->invoke($provider))->toBe(['signed:relative', 'throttle:600,1']);
+
+    config()->set('hybrid-cache.refresh.http.sync_middleware', ['auth.basic', 'signed:relative']);
+    expect($method->invoke($provider))->toBe(['signed:relative', 'auth.basic', 'throttle:60,1']);
+
+    config()->set('hybrid-cache.refresh.http.sync_middleware', null);
+    expect($method->invoke($provider))->toBe(['signed:relative', 'throttle:60,1']);
+});
+
 it('casts refresh http enabled config to bool', function (): void {
     $provider = new HybridCacheServiceProvider(app());
     $method = new ReflectionMethod($provider, 'refreshHttpEnabled');

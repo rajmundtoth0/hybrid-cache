@@ -75,7 +75,7 @@ final class HybridCacheServiceProvider extends ServiceProvider
         // Separate internal endpoint for node-local hydration; never rebuild.
         // Relative signatures allow each node to have a different trusted host.
         Route::post($this->refreshSyncPath(), HybridCacheSyncController::class)
-            ->middleware(['signed:relative', 'throttle:60,1'])
+            ->middleware($this->refreshSyncMiddleware())
             ->name('hybrid-cache.sync');
     }
 
@@ -84,33 +84,63 @@ final class HybridCacheServiceProvider extends ServiceProvider
      */
     private function refreshHttpMiddleware(): array
     {
-        $middleware = $this->app->make('config')->get('hybrid-cache.refresh.http.middleware', []);
-
-        if (! is_array($middleware)) {
-            $middleware = [];
-        }
-
-        $middleware = array_values(array_filter(
-            $middleware,
-            static fn (mixed $item): bool => is_string($item) && $item !== ''
-        ));
+        $middleware = $this->configuredMiddleware('hybrid-cache.refresh.http.middleware');
 
         if (! in_array('signed', $middleware, true)) {
             $middleware[] = 'signed';
         }
 
-        $hasThrottle = false;
+        return $this->withDefaultThrottle($middleware);
+    }
 
+    /**
+     * The cluster service signs relative URLs, so an absolute `signed` check
+     * would reject every node; `signed:relative` is always enforced instead.
+     *
+     * @return array<int, string>
+     */
+    private function refreshSyncMiddleware(): array
+    {
+        $middleware = array_values(array_filter(
+            $this->configuredMiddleware('hybrid-cache.refresh.http.sync_middleware'),
+            static fn (string $item): bool => $item !== 'signed' && $item !== 'signed:relative'
+        ));
+
+        array_unshift($middleware, 'signed:relative');
+
+        return $this->withDefaultThrottle($middleware);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function configuredMiddleware(string $configKey): array
+    {
+        $middleware = $this->app->make('config')->get($configKey, []);
+
+        if (! is_array($middleware)) {
+            $middleware = [];
+        }
+
+        return array_values(array_filter(
+            $middleware,
+            static fn (mixed $item): bool => is_string($item) && $item !== ''
+        ));
+    }
+
+    /**
+     * @param array<int, string> $middleware
+     * @return array<int, string>
+     */
+    private function withDefaultThrottle(array $middleware): array
+    {
         foreach ($middleware as $item) {
             if (str_starts_with($item, 'throttle')) {
-                $hasThrottle = true;
-                break;
+                return $middleware;
             }
         }
 
-        if (! $hasThrottle) {
-            $middleware[] = 'throttle:60,1';
-        }
+        $middleware[] = 'throttle:60,1';
 
         return $middleware;
     }

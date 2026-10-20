@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\URL;
 use rajmundtoth0\HybridCache\CacheEnvelope;
 use rajmundtoth0\HybridCache\HybridCacheManager;
@@ -12,6 +13,11 @@ use rajmundtoth0\HybridCache\Services\HybridCacheClusterService;
 
 it('requires a relative signed URL before synchronizing a local cache', function (): void {
     $this->postJson('/hybrid-cache/sync?key=test&digest='.str_repeat('a', 64))->assertStatus(403);
+});
+
+it('registers the sync route with relative signatures and the configured throttle', function (): void {
+    expect(Route::getRoutes()->getByName('hybrid-cache.sync')?->middleware())
+        ->toBe(['signed:relative', 'throttle:60,1']);
 });
 
 it('hydrates APCu from the shared value over signed HTTP without invoking a builder', function (): void {

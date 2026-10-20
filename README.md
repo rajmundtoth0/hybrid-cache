@@ -338,6 +338,14 @@ not share its APCu. HTTP origins are rejected unless explicitly allowed with
 internal development networks. Keep the signed endpoints inaccessible from
 untrusted networks.
 
+The sync route always requires `signed:relative`. Its limiter is set by
+`refresh.http.sync_middleware` (default `['signed:relative', 'throttle:60,1']`;
+`throttle:60,1` is added when no throttle is listed). Laravel keys that
+throttle by client IP, and nodes using a shared limiter cache store share one
+budget for the publisher: one key fanned out to two nodes uses two requests.
+Size the limit for your peak fan-out rate, otherwise excess notifications are
+rejected with HTTP 429 and reported as failed nodes.
+
 Publish and synchronize one registered key:
 
 ```bash
