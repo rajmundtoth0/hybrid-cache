@@ -354,21 +354,46 @@ php artisan hybrid-cache:refresh dashboard:stats --cluster
 
 Or invoke `app(\rajmundtoth0\HybridCache\Services\HybridCacheClusterService::class)->refreshAndSyncKey('dashboard:stats')`
 from trusted application code. To retry nodes after a successful publish,
-call `syncNodes('dashboard:stats')` without rebuilding the value.
+call `syncNodes('dashboard:stats')` without rebuilding the value, or
+`syncNodes('dashboard:stats', ['web-b'])` to notify only the nodes that failed.
+
+A publish usually follows a change to the source data, so it never skips
+because another builder holds the refresh lock: that build may have read the
+data before the change. It waits up to `refresh.publish_wait_seconds`
+(default 30) and then builds; if the lock is still held, nothing is published
+and the result is `failed` with reason `lock_timeout` (`--cluster` exits
+non-zero).
+
+Besides the per-node status in `data.nodes`, the result's `data.details` reports
+each node's attempts, last HTTP status, duration, acknowledgement time and the
+node's own failure reason: `superseded` (a newer payload was published; this
+digest is not retried), `changed_during_sync`, `no_fresh_payload`,
+`local_write_failed`, `unreachable` or `http_<status>`.
 
 The caller sends a **relative signed** URL with the requested key and digest.
 Each node reads the authoritative fresh distributed envelope, writes the
 inactive local slot for coordinated keys, promotes it, and acknowledges the
 digest it actually synchronized. A duplicate notification safely hydrates
-the same payload again. The dispatcher retries each node a bounded number of
-times and returns per-node acknowledgement/failure details; partial failure
-is reported as a failure, **not** cluster success.
+the same payload again. A delayed notification for a superseded digest is
+rejected without writing. If a newer payload is published while a node is
+writing an older one, the node evicts its local copy instead of acknowledging
+it; the older payload stays visible only until that sync's post-write digest
+check completes, and the next read rehydrates from the distributed store. The dispatcher retries each
+node a bounded number of times and returns per-node acknowledgement/failure
+details; partial failure is reported as a failure, **not** cluster success.
 
 **Consistency limits:** delivery is synchronous and best-effort; it is *not*
 a durable queue or atomic cluster-wide cutover. A process crash, disconnected
 node, overlapping write or freshly started node can leave local copies behind.
 Nodes can continue serving previously cached values while propagation is in
-progress. Re-run `syncNodes` or use a durable retry/reconciliation job in
+progress. Local hydration on the read path is not version-checked: a read that
+fetched the previous distributed payload just before a publish can write it
+locally after that node acknowledged the newer one; it stays until the next
+sync for the key or until it expires. Distributed writes are ordered by the
+refresh lock, which has no fencing token: a holder stalled for longer than
+`lock_ttl` can still write after its lock expired. A miss that gives up waiting
+for a lock holder builds without the lock but stores its result only if the key
+is still absent, so it never replaces a payload published meanwhile. Re-run `syncNodes` or use a durable retry/reconciliation job in
 production, and use bounded TTLs. For strict cross-node freshness, an
 additional shared-version check, fencing or acknowledgement/barrier protocol
 is necessary (and adds read-path or coordination overhead). This mechanism
