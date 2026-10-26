@@ -291,6 +291,8 @@ php artisan hybrid-cache:refresh --group=dashboard --all
 
 ### Opt-in multi-server warm synchronization
 
+Available since 0.3.0 (see [CHANGELOG](CHANGELOG.md)).
+
 The standard signed `/hybrid-cache/refresh` endpoint refreshes **one receiving
 node**. Its distributed rebuild lock prevents duplicate builders, but it does
 not populate the APCu memory of every web server automatically.
