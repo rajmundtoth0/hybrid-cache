@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
+use Illuminate\Cache\Events\CacheHit;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
 use rajmundtoth0\HybridCache\CacheEnvelope;
 use rajmundtoth0\HybridCache\HybridCacheManager;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
@@ -264,4 +266,72 @@ it('throws when locks are unsupported', function (): void {
 
     expect(fn () => $manager->lock('no-lock'))
         ->toThrow(\BadMethodCallException::class);
+});
+
+it('never writes a payload polled while waiting for the lock back in single-store mode', function (): void {
+    $config = app(HybridCacheConfigService::class)->make([
+        'local_store' => 'distributed-array',
+        'distributed_store' => 'distributed-array',
+    ]);
+    $manager = new HybridCacheManager(
+        app: app(),
+        cache: app('cache'),
+        config: $config,
+        lockService: new HybridCacheLockService(cache: app('cache'), config: $config),
+        localCache: new HybridLocalCacheService(),
+    );
+    $method = new ReflectionMethod($manager, 'refreshValue');
+    $method->setAccessible(true);
+    $lock = $manager->lock('single-poll', 5);
+    $lock->get();
+    $payloadKey = 'hybrid-cache:single-poll';
+    Cache::store('distributed-array')->put($payloadKey, CacheEnvelope::fresh('older', 60, 0, time())->toArray(), 60);
+    $published = false;
+
+    // A publisher stores a newer payload right after the waiter polled the older one.
+    Event::listen(CacheHit::class, function (CacheHit $event) use ($payloadKey, &$published): void {
+        if (! $published && $event->key === $payloadKey) {
+            $published = true;
+            Cache::store('distributed-array')->put($payloadKey, CacheEnvelope::fresh('newer', 60, 0, time())->toArray(), 60);
+        }
+    });
+
+    $refreshed = $method->invoke($manager, 'single-poll', $payloadKey, 'hybrid-cache:lock:single-poll', fn (): string => 'builder', 60, 0, null, null, false);
+    $lock->release();
+
+    expect($published)->toBeTrue()
+        ->and($refreshed->value)->toBe('older')
+        ->and(Cache::store('distributed-array')->get($payloadKey)['value'])->toBe('newer');
+});
+
+it('does not let an unlocked fallback build replace a payload stored meanwhile', function (): void {
+    $manager = app(HybridCacheManager::class);
+    $method = new ReflectionMethod($manager, 'refreshValue');
+    $method->setAccessible(true);
+    $lock = $manager->lock('unlocked-fallback', 5);
+    $lock->get();
+    $payloadKey = 'hybrid-cache:unlocked-fallback';
+
+    $refreshed = $method->invoke(
+        $manager,
+        'unlocked-fallback',
+        $payloadKey,
+        'hybrid-cache:lock:unlocked-fallback',
+        function () use ($payloadKey): string {
+            // The lock holder publishes while this slow, unlocked build runs.
+            Cache::store('distributed-array')->put($payloadKey, CacheEnvelope::fresh('published', 60, 0, time())->toArray(), 60);
+
+            return 'unlocked-build';
+        },
+        60,
+        0,
+        null,
+        null,
+        false,
+    );
+    $lock->release();
+
+    expect($refreshed->value)->toBe('published')
+        ->and(Cache::store('distributed-array')->get($payloadKey)['value'])->toBe('published')
+        ->and(Cache::store('local-array')->get($payloadKey)['value'])->toBe('published');
 });

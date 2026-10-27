@@ -242,18 +242,20 @@ final class HybridCacheManager
     }
 
     /**
-     * Identifier of the published, still-fresh distributed payload.
-     * Used by the fan-out coordinator to tie acknowledgements to a snapshot.
-     */
-    /**
      * Build the shared version exactly once, without touching the publisher's
      * local APCu (the publisher may be a CLI process with a different pool).
+     *
+     * A publish follows a change to the source data, so with $waitSeconds > 0 it
+     * waits for a builder already holding the refresh lock instead of skipping:
+     * that build may have read the data before the change. If the wait runs out
+     * nothing is published and the result is FAILED, never already_refreshing.
      */
     public function publishPayload(
         string $key,
         Closure $builder,
         int|DateInterval|DateTimeInterface $ttl,
         int|DateInterval|DateTimeInterface|null $staleTtl = null,
+        int $waitSeconds = 0,
     ): RefreshResult {
         return $this->performRefresh(
             key: $key,
@@ -262,9 +264,14 @@ final class HybridCacheManager
             staleTtl: $staleTtl,
             coordinated: $this->usesCoordinatedStorage($key),
             hydrateLocal: false,
+            waitSeconds: $waitSeconds,
         );
     }
 
+    /**
+     * Identifier of the published, still-fresh distributed payload.
+     * Used by the fan-out coordinator to tie acknowledgements to a snapshot.
+     */
     public function distributedDigest(string $key): ?string
     {
         $envelope = $this->distributedEnvelope($this->payloadKey($key));
@@ -291,13 +298,13 @@ final class HybridCacheManager
         $envelope = $this->distributedEnvelope($payloadKey);
 
         if ($envelope === null || ! $envelope->isFresh($now)) {
-            return RefreshResult::notFound('No fresh distributed payload to hydrate.', ['key' => $key]);
+            return RefreshResult::notFound('No fresh distributed payload to hydrate.', ['key' => $key, 'reason' => 'no_fresh_payload']);
         }
 
         $digest = hash('sha256', serialize($envelope->toArray()));
 
         if ($expectedDigest !== null && ! hash_equals($expectedDigest, $digest)) {
-            return RefreshResult::failed($key, 'Published payload has been superseded; retry with the current digest.');
+            return RefreshResult::failed($key, 'Published payload has been superseded; retry with the current digest.', 'superseded');
         }
 
         if ($singleStore) {
@@ -316,16 +323,21 @@ final class HybridCacheManager
                 $slot = $this->localCache->persistRefreshedEnvelope($localStore, $payloadKey, $envelope, $ttl);
 
                 if ($slot === null) {
-                    return RefreshResult::failed($key, 'Could not promote local cache slot.');
+                    return RefreshResult::failed($key, 'Could not promote local cache slot.', 'local_write_failed');
                 }
             } elseif (! $this->localCache->persistEnvelope($localStore, $payloadKey, $envelope, $ttl, false)) {
-                return RefreshResult::failed($key, 'Could not hydrate local cache.');
+                return RefreshResult::failed($key, 'Could not hydrate local cache.', 'local_write_failed');
             }
 
             // A concurrent publication may have replaced the payload mid-sync.
-            // Do not acknowledge an older revision as a successful cluster sync.
+            // Do not acknowledge an older revision as a successful cluster sync,
+            // and evict it: the newer sync may already have written and been
+            // acknowledged on this node, and this write may have replaced it.
+            // The next read rehydrates from the authoritative distributed store.
             if ($this->distributedDigest($key) !== $digest) {
-                return RefreshResult::failed($key, 'Distributed payload changed during local sync; retry.');
+                $this->localCache->forgetEnvelope($localStore, $payloadKey);
+
+                return RefreshResult::failed($key, 'Distributed payload changed during local sync; retry.', 'changed_during_sync');
             }
 
             return RefreshResult::ok('Local cache synchronized.', array_filter([
@@ -334,7 +346,7 @@ final class HybridCacheManager
                 'slot' => $slot,
             ], static fn (mixed $value): bool => $value !== null));
         } catch (\Throwable $error) {
-            return RefreshResult::failed($key, $error->getMessage());
+            return RefreshResult::failed($key, $error->getMessage(), 'exception');
         }
     }
 
@@ -380,13 +392,16 @@ final class HybridCacheManager
         int|DateInterval|DateTimeInterface|null $staleTtl,
         bool $coordinated,
         bool $hydrateLocal = true,
+        int $waitSeconds = 0,
     ): RefreshResult {
         $payloadKey = $this->payloadKey($key);
         $lockKey = $this->lockService->lockKey($key);
-        $release = $this->lockService->acquireRefreshLock($lockKey);
+        $release = $this->lockService->acquireRefreshLock($lockKey, waitSeconds: $waitSeconds);
 
         if ($release === null) {
-            return RefreshResult::alreadyRefreshing($key);
+            return $waitSeconds > 0
+                ? RefreshResult::failed($key, 'Timed out waiting for the refresh lock; nothing was published.', 'lock_timeout')
+                : RefreshResult::alreadyRefreshing($key);
         }
 
         try {
@@ -519,12 +534,56 @@ final class HybridCacheManager
         $fromDistributed = $this->awaitDistributedPayload($payloadKey);
 
         if ($fromDistributed === null) {
-            return $this->storeFreshPayload($key, $payloadKey, $callback, $freshTtl, $staleWindow);
+            return $this->storeUnlockedPayload($key, $payloadKey, $callback, $freshTtl, $staleWindow, $activeSlot, $coordinated);
         }
 
-        $this->localCache->hydrateEnvelope($this->localStore(), $payloadKey, $fromDistributed, time(), $activeSlot, $coordinated);
+        // In single-store mode the polled payload is already the only copy;
+        // writing it back without the lock could replace a newer publish.
+        if (! $this->usesSingleStore()) {
+            $this->localCache->hydrateEnvelope($this->localStore(), $payloadKey, $fromDistributed, time(), $activeSlot, $coordinated);
+        }
 
         return $fromDistributed;
+    }
+
+    /**
+     * Builds without the refresh lock once the wait for its holder ran out. The
+     * distributed write only succeeds while the key is still absent, so a slow
+     * unlocked build can never replace a payload that the lock holder or a
+     * publisher stored meanwhile; that payload is served instead.
+     */
+    private function storeUnlockedPayload(
+        string $key,
+        string $payloadKey,
+        Closure $callback,
+        int $freshTtl,
+        int $staleWindow,
+        ?string $activeSlot,
+        bool $coordinated,
+    ): CacheEnvelope {
+        $now = time();
+        $envelope = CacheEnvelope::fresh($callback(), $freshTtl, $staleWindow, $now);
+        $ttl = max(1, $envelope->secondsUntilExpiry($now));
+
+        if ($this->distributedStore()->add($payloadKey, $envelope->toArray(), $ttl)) {
+            if (! $this->usesSingleStore()) {
+                $this->localCache->persistEnvelope($this->localStore(), $payloadKey, $envelope, $ttl, $this->usesCoordinatedStorage($key));
+            }
+
+            return $envelope;
+        }
+
+        $stored = $this->distributedEnvelope($payloadKey);
+
+        if ($stored === null) {
+            return $envelope;
+        }
+
+        if (! $this->usesSingleStore()) {
+            $this->localCache->hydrateEnvelope($this->localStore(), $payloadKey, $stored, time(), $activeSlot, $coordinated);
+        }
+
+        return $stored;
     }
 
     private function storeFreshPayload(string $key, string $payloadKey, Closure $callback, int $freshTtl, int $staleWindow): CacheEnvelope

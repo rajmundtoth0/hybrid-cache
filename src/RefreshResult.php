@@ -52,9 +52,18 @@ final class RefreshResult implements Responsable
         return new self(StatusEnum::NOT_FOUND->value, $message, $data);
     }
 
-    public static function failed(string $key, string $message): self
+    /**
+     * @param string|null $reason Machine-readable cause, e.g. superseded or lock_timeout.
+     */
+    public static function failed(string $key, string $message, ?string $reason = null): self
     {
-        return new self(StatusEnum::FAILED->value, $message, ['key' => $key]);
+        $data = ['key' => $key];
+
+        if ($reason !== null) {
+            $data['reason'] = $reason;
+        }
+
+        return new self(StatusEnum::FAILED->value, $message, $data);
     }
 
     /**

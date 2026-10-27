@@ -14,6 +14,8 @@ use rajmundtoth0\HybridCache\Config\HybridCacheConfig;
 
 final class HybridCacheLockService
 {
+    private const WAIT_INTERVAL_US = 10_000;
+
     public function __construct(
         private readonly CacheManager $cache,
         private readonly HybridCacheConfig $config,
@@ -27,29 +29,35 @@ final class HybridCacheLockService
 
     /**
      * Tries to acquire an exclusive refresh lock in the distributed store.
-     * Returns a release closure on success, or null when another worker already holds the lock.
+     * Returns a release closure on success, or null when another worker holds the lock
+     * and does not release it within $waitSeconds (0 = do not wait).
      * Uses native lock primitives when the store supports them; falls back to an atomic add key.
      *
      * @return (Closure(): bool)|null
      */
-    public function acquireRefreshLock(string $lockKey, ?int $seconds = null, string|int|null $owner = null): ?Closure
+    public function acquireRefreshLock(string $lockKey, ?int $seconds = null, string|int|null $owner = null, int $waitSeconds = 0): ?Closure
     {
         $store = $this->distributedStore();
         $backend = $store->getStore();
         $lockTtl = $seconds ?? $this->lockTtl();
+        $deadline = hrtime(true) + max(0, $waitSeconds) * 1_000_000_000;
 
         if ($backend instanceof LockProvider) {
             $lock = $backend->lock($lockKey, $lockTtl, $owner === null ? null : (string) $owner);
 
-            if (! $lock->get()) {
-                return null;
+            while (! $lock->get()) {
+                if (! $this->waitUntil($deadline)) {
+                    return null;
+                }
             }
 
             return fn (): bool => $lock->release();
         }
 
-        if (! $store->add($lockKey, true, $lockTtl)) {
-            return null;
+        while (! $store->add($lockKey, true, $lockTtl)) {
+            if (! $this->waitUntil($deadline)) {
+                return null;
+            }
         }
 
         return fn (): bool => $store->forget($lockKey);
@@ -107,6 +115,18 @@ final class HybridCacheLockService
     public function restoreLock(string $name, string|int $owner): Lock
     {
         return $this->makeLock($name, owner: $owner);
+    }
+
+    /** Sleeps one polling interval, unless the deadline has passed. */
+    private function waitUntil(int|float $deadline): bool
+    {
+        if (hrtime(true) >= $deadline) {
+            return false;
+        }
+
+        usleep(self::WAIT_INTERVAL_US);
+
+        return true;
     }
 
     private function lockTtl(): int
