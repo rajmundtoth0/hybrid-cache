@@ -14,6 +14,22 @@ jobs:
             matrix:
                 php: ["8.3", "8.4", "8.5"]
 
+        services:
+            valkey:
+                image: valkey/valkey:8-alpine
+                ports:
+                    - 6379:6379
+                options: >-
+                    --health-cmd "valkey-cli ping"
+                    --health-interval 5s
+                    --health-timeout 3s
+                    --health-retries 10
+
+        env:
+            # Enables tests/Integration against the service above (they are skipped without it).
+            HYBRID_CACHE_TEST_VALKEY_HOST: 127.0.0.1
+            HYBRID_CACHE_TEST_VALKEY_PORT: 6379
+
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -24,6 +40,8 @@ jobs:
                   php-version: ${{ matrix.php }}
                   coverage: none
                   tools: composer:v2
+                  extensions: redis, apcu, pcntl, posix
+                  ini-values: apc.enable_cli=1
 
             - name: Get Composer Cache Directory
               id: composer-cache
@@ -53,6 +71,22 @@ jobs:
     coverage:
         runs-on: ubuntu-latest
 
+        services:
+            valkey:
+                image: valkey/valkey:8-alpine
+                ports:
+                    - 6379:6379
+                options: >-
+                    --health-cmd "valkey-cli ping"
+                    --health-interval 5s
+                    --health-timeout 3s
+                    --health-retries 10
+
+        env:
+            # Enables tests/Integration against the service above (they are skipped without it).
+            HYBRID_CACHE_TEST_VALKEY_HOST: 127.0.0.1
+            HYBRID_CACHE_TEST_VALKEY_PORT: 6379
+
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -63,6 +97,8 @@ jobs:
                   php-version: "8.3"
                   coverage: xdebug
                   tools: composer:v2
+                  extensions: redis, apcu, pcntl, posix
+                  ini-values: apc.enable_cli=1
 
             - name: Get Composer Cache Directory
               id: composer-cache

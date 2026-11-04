@@ -42,8 +42,12 @@ final class HybridCacheClusterService
     /**
      * Asks every configured node, or only $nodeNames (for example to retry the
      * nodes that failed), to hydrate the currently published payload. data.nodes
-     * holds each node's status; data.details adds attempts, the last HTTP
-     * status, the node's failure reason, the duration and the ack time.
+     * holds each node's status; data.failed_nodes lists the nodes that did not
+     * acknowledge, ready to pass back as $nodeNames; data.details adds attempts,
+     * the last HTTP status, the node's failure reason, the duration and the ack time.
+     *
+     * Retrying is idempotent: the digest is read again on every call, so a retry
+     * delivers the payload that is published now, never an older one.
      *
      * @param list<string>|null $nodeNames
      */
@@ -60,6 +64,10 @@ final class HybridCacheClusterService
         }
 
         if ($nodeNames !== null) {
+            if ($nodeNames === []) {
+                return RefreshResult::invalid('Name at least one node to synchronize.');
+            }
+
             $nodes = array_combine($nodeNames, array_map(static fn (string $name): mixed => $nodes[$name] ?? null, $nodeNames));
         }
 
@@ -144,7 +152,14 @@ final class HybridCacheClusterService
             }
         }
 
-        $data = ['key' => $key, 'digest' => $digest, 'nodes' => $results, 'details' => $details];
+        $failedNodes = array_keys(array_filter($results, static fn (string $status): bool => $status !== 'acknowledged'));
+        $data = [
+            'key' => $key,
+            'digest' => $digest,
+            'nodes' => $results,
+            'failed_nodes' => array_map(strval(...), $failedNodes),
+            'details' => $details,
+        ];
 
         return $failed
             ? new RefreshResult(StatusEnum::FAILED->value, 'Some nodes did not acknowledge the published value.', $data)

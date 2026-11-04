@@ -7,8 +7,13 @@ return [
 
     'distributed_store' => env('HYBRID_CACHE_DISTRIBUTED_STORE', env('CACHE_STORE', 'file')),
 
+    // Seconds a value stays serveable after its fresh TTL (stale-while-revalidate).
+    // Also the lifetime of a counter that increment()/decrement() creates (60 when 0).
     'stale_ttl' => (int) env('HYBRID_CACHE_STALE_TTL', 300),
 
+    // Seconds a refresh lock is held. A refresh still building when its lock
+    // expires does not publish its result. The distributed store must support
+    // native locks (Laravel's LockProvider); size this above your slowest build.
     'lock_ttl' => (int) env('HYBRID_CACHE_LOCK_TTL', 30),
 
     'key_prefix' => env('HYBRID_CACHE_PREFIX', 'hybrid-cache:'),

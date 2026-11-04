@@ -48,3 +48,44 @@ it('hydrates from stored payload', function (): void {
     expect($envelope)->not->toBeNull()
         ->and($envelope?->value)->toBe('stored');
 });
+
+it('round-trips a version and omits it while it is zero', function (): void {
+    $now = time();
+    $legacy = CacheEnvelope::fresh('value', 60, 0, $now);
+    $versioned = CacheEnvelope::fresh('value', 60, 0, $now, 42);
+
+    expect($legacy->toArray())->not->toHaveKey('version')
+        ->and(CacheEnvelope::fromStored($legacy->toArray())?->version)->toBe(0)
+        ->and($versioned->toArray()['version'])->toBe(42)
+        ->and(CacheEnvelope::fromStored($versioned->toArray())?->version)->toBe(42)
+        ->and(CacheEnvelope::fromStored(['value' => 1, 'fresh_until' => $now + 9, 'stale_until' => $now + 9, 'version' => 'x'])?->version)->toBe(0)
+        ->and($versioned->digest())->not->toBe($legacy->digest())
+        ->and(CacheEnvelope::fromStored($versioned->toArray())?->digest())->toBe($versioned->digest());
+});
+
+it('orders versions after the payload they replace, even one stamped by a clock ahead', function (): void {
+    $now = (int) floor(microtime(true) * 1_000_000);
+    $ahead = new CacheEnvelope('ahead', time() + 60, time() + 60, $now + 60_000_000);
+
+    expect(CacheEnvelope::versionAfter(null))->toBeGreaterThanOrEqual($now)
+        ->and(CacheEnvelope::versionAfter($ahead))->toBe($ahead->version + 1);
+});
+
+it('only lets a fresh, newer copy supersede an incoming payload', function (): void {
+    $now = time();
+    $older = new CacheEnvelope('old', $now + 60, $now + 60, 1);
+    $newer = new CacheEnvelope('new', $now + 60, $now + 60, 2);
+    $newerButStale = new CacheEnvelope('new', $now - 1, $now + 60, 2);
+
+    expect($newer->supersedes($older, $now))->toBeTrue()
+        ->and($older->supersedes($newer, $now))->toBeFalse()
+        ->and($newer->supersedes($newer, $now))->toBeFalse()
+        ->and($newerButStale->supersedes($older, $now))->toBeFalse();
+});
+
+it('recognizes the stored envelope layout whether or not it expired', function (): void {
+    expect(CacheEnvelope::isStoredEnvelope(['value' => null, 'fresh_until' => 1, 'stale_until' => 1]))->toBeTrue()
+        ->and(CacheEnvelope::fromStored(['value' => null, 'fresh_until' => 1, 'stale_until' => 1]))->toBeNull()
+        ->and(CacheEnvelope::isStoredEnvelope(['fresh_until' => 1, 'stale_until' => 1]))->toBeFalse()
+        ->and(CacheEnvelope::isStoredEnvelope(5))->toBeFalse();
+});

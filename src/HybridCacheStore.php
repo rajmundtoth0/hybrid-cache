@@ -56,6 +56,17 @@ final class HybridCacheStore implements LockProvider, Store
         return true;
     }
 
+    /**
+     * Laravel's Repository::add() uses this when present, instead of a get() followed
+     * by a put(): two processes can no longer both observe a missing key and write.
+     *
+     * @param \UnitEnum|string $key
+     */
+    public function add($key, mixed $value, mixed $seconds): bool
+    {
+        return $this->manager->add(KeyNormalizer::normalize($key), $value, $seconds);
+    }
+
     public function increment($key, $value = 1): int|bool
     {
         return $this->manager->increment(KeyNormalizer::normalize($key), $this->normalizeDelta($value));

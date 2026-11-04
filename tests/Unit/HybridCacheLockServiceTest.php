@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Cache;
 use rajmundtoth0\HybridCache\CacheEnvelope;
+use rajmundtoth0\HybridCache\Exceptions\UnsupportedStoreException;
+use rajmundtoth0\HybridCache\RefreshLease;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
 use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
 use rajmundtoth0\HybridCache\Tests\Support\NoLockStore;
@@ -32,7 +34,7 @@ it('acquires and releases provider-backed refresh locks', function (): void {
     expect($service->acquireRefreshLock($lockKey))->not->toBeNull();
 });
 
-it('acquires and releases fallback refresh locks when lock support is unavailable', function (): void {
+it('refuses fallback refresh locks when lock support is unavailable', function (): void {
     Cache::extend('nolock-service', fn ($app, array $config) => $app['cache']->repository(new NoLockStore(), $config));
     config()->set('cache.stores.nolock-service', ['driver' => 'nolock-service']);
 
@@ -42,15 +44,9 @@ it('acquires and releases fallback refresh locks when lock support is unavailabl
     $service = new HybridCacheLockService(app('cache'), $config);
     $lockKey = $service->lockKey('fallback');
 
-    $release = $service->acquireRefreshLock($lockKey);
-
-    expect($release)->not->toBeNull()
-        ->and(Cache::store('nolock-service')->get($lockKey))->toBeTrue()
-        ->and($service->acquireRefreshLock($lockKey))->toBeNull();
-
-    $release();
-
-    expect(Cache::store('nolock-service')->get($lockKey))->toBeNull();
+    // The former add()/forget() fallback let an expired owner delete the next owner's lock.
+    expect(fn () => $service->acquireRefreshLock($lockKey))->toThrow(UnsupportedStoreException::class)
+        ->and(Cache::store('nolock-service')->get($lockKey))->toBeNull();
 });
 
 it('returns null when withRefreshLock cannot acquire the lock', function (): void {
@@ -110,4 +106,35 @@ it('throws when the configured distributed store does not support locks', functi
 
     expect(fn () => $service->makeLock('unsupported'))
         ->toThrow(BadMethodCallException::class, 'The configured distributed cache store does not support locks.');
+});
+
+it('revokes outstanding leases without releasing their lock', function (): void {
+    $config = app(HybridCacheConfigService::class)->make();
+    $service = new HybridCacheLockService(app('cache'), $config);
+    $lockKey = $service->lockKey('leased');
+    $lease = $service->acquireRefreshLease($lockKey);
+    $epoch = fn (): mixed => Cache::store('distributed-array')->get($service->epochKey($lockKey));
+
+    expect($lease)->not->toBeNull()
+        ->and($lease->isCurrent($epoch()))->toBeTrue()
+        ->and($service->invalidateRefreshes($lockKey))->toBeTrue()
+        ->and($lease->isCurrent($epoch()))->toBeFalse()
+        ->and(RefreshLease::lossReason($epoch()))->toBe('invalidated')
+        ->and(RefreshLease::lossReason(null))->toBe('lease_lost')
+        ->and(RefreshLease::lossReason('lease:other'))->toBe('lease_lost')
+        ->and($service->acquireRefreshLease($lockKey))->toBeNull()
+        ->and($lease->release())->toBeTrue();
+});
+
+it('gives every lease its own token, even with a fixed lock owner', function (): void {
+    $service = new HybridCacheLockService(app('cache'), app(HybridCacheConfigService::class)->make());
+    $lockKey = $service->lockKey('fixed-owner');
+
+    $first = $service->acquireRefreshLease($lockKey, 5, 'same-owner');
+    $first?->release();
+    $second = $service->acquireRefreshLease($lockKey, 5, 'same-owner');
+
+    expect($first?->token)->not->toBe($second?->token)
+        ->and($first?->isCurrent(Cache::store('distributed-array')->get($service->epochKey($lockKey))))->toBeFalse()
+        ->and($second?->isCurrent(Cache::store('distributed-array')->get($service->epochKey($lockKey))))->toBeTrue();
 });
