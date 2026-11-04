@@ -23,6 +23,11 @@ abstract class TestCase extends Orchestra
             'driver' => 'array',
             'serialize' => true,
         ]);
+        // A second node's local cache, for tests with two independent readers.
+        $app['config']->set('cache.stores.local-array-b', [
+            'driver' => 'array',
+            'serialize' => true,
+        ]);
         $app['config']->set('cache.stores.distributed-array', [
             'driver' => 'array',
             'serialize' => true,

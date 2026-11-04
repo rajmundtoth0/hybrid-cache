@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Cache;
 use rajmundtoth0\HybridCache\CacheEnvelope;
 use rajmundtoth0\HybridCache\HybridCacheManager;
 use rajmundtoth0\HybridCache\Enum\StatusEnum;
+use rajmundtoth0\HybridCache\Exceptions\UnsupportedStoreException;
 use rajmundtoth0\HybridCache\Services\HybridCacheConfigService;
 use rajmundtoth0\HybridCache\Services\HybridCacheLockService;
 use rajmundtoth0\HybridCache\Services\HybridLocalCacheService;
@@ -186,7 +187,7 @@ it('fails when distributed writes fail', function (): void {
     expect($result->status)->toBe(StatusEnum::FAILED->value);
 });
 
-it('uses the non-locking refresh path when locks are unavailable', function (): void {
+it('rejects refreshes when the distributed store has no native locks', function (): void {
     Cache::extend('nolock', fn ($app, array $config) => $app['cache']->repository(new NoLockStore(), $config));
     config()->set('cache.stores.nolock', ['driver' => 'nolock']);
 
@@ -202,9 +203,10 @@ it('uses the non-locking refresh path when locks are unavailable', function (): 
         localCache: new HybridLocalCacheService(),
     );
 
-    $result = $manager->coordinatedRefresh('nolock-key', fn (): string => 'value', 60);
-
-    expect($result->status)->toBe(StatusEnum::REFRESHED->value);
+    // An add()/forget() lock cannot be released by its owner only, so it is refused.
+    expect(fn () => $manager->coordinatedRefresh('nolock-key', fn (): string => 'value', 60))
+        ->toThrow(UnsupportedStoreException::class)
+        ->and(Cache::store('nolock')->get('hybrid-cache:nolock-key'))->toBeNull();
 });
 
 it('falls back when group version increment fails', function (): void {

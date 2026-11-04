@@ -9,6 +9,13 @@ use rajmundtoth0\HybridCache\CacheEnvelope;
 
 final class HybridLocalCacheService
 {
+    /** install(): the envelope is now this node's copy. */
+    public const WRITTEN = 'written';
+    /** install(): not written; this node already holds a newer, still fresh copy. */
+    public const SUPERSEDED = 'superseded';
+    /** install(): the local store refused the write. */
+    public const WRITE_FAILED = 'write_failed';
+
     private const SLOT_A = 'a';
     private const SLOT_B = 'b';
 
@@ -54,10 +61,15 @@ final class HybridLocalCacheService
 
     /**
      * Copies a distributed envelope into local storage for subsequent fast reads.
-     * Uses the slot indicated by $activeSlot (null → base key) so the local layout
-     * stays consistent with what the reader already observed.
      * Silently skips expired envelopes to prevent local extension of expired state.
      * Non-coordinated keys are hydrated directly to the base key.
+     *
+     * The local copy is re-read first: a sync or refresh may have installed a newer
+     * payload, or promoted the other slot, after the caller read the distributed one.
+     * A copy that is still fresh and newer is kept, and coordinated keys are written to
+     * the slot that is active now, so hydration never reverts a promotion.
+     *
+     * @param string|null $activeSlot Ignored since 0.3.1: the active slot is re-read.
      */
     public function hydrateEnvelope(Repository $store, string $payloadKey, CacheEnvelope $envelope, int $now, ?string $activeSlot = null, bool $coordinated = true): bool
     {
@@ -67,11 +79,75 @@ final class HybridLocalCacheService
             return false;
         }
 
+        $currentSlot = null;
+
+        if ($this->readEnvelope($store, $payloadKey, $coordinated, $currentSlot)?->supersedes($envelope, $now)) {
+            return false;
+        }
+
         if (! $coordinated) {
             return $store->put($payloadKey, $envelope->toArray(), $ttl);
         }
 
-        return $this->writeEnvelope($store, $payloadKey, $envelope->toArray(), $ttl, $activeSlot);
+        return $this->writeEnvelope($store, $payloadKey, $envelope->toArray(), $ttl, $currentSlot);
+    }
+
+    /**
+     * Installs a published envelope as this node's copy (node sync and refresh
+     * publication): coordinated keys through the inactive slot and a pointer flip, other
+     * keys at the base key. Skipped when the node already holds a newer, still fresh
+     * copy, unless $replaceNewer is set. $slot receives the promoted slot.
+     *
+     * @return self::WRITTEN|self::SUPERSEDED|self::WRITE_FAILED
+     */
+    public function install(
+        Repository $store,
+        string $payloadKey,
+        CacheEnvelope $envelope,
+        int $ttl,
+        bool $coordinated,
+        int $now,
+        bool $replaceNewer = false,
+        ?string &$slot = null,
+    ): string {
+        $slot = null;
+
+        if (! $replaceNewer && $this->readEnvelope($store, $payloadKey, $coordinated)?->supersedes($envelope, $now)) {
+            return self::SUPERSEDED;
+        }
+
+        if ($coordinated) {
+            $slot = $this->persistRefreshedEnvelope($store, $payloadKey, $envelope, $ttl);
+
+            return $slot === null ? self::WRITE_FAILED : self::WRITTEN;
+        }
+
+        return $store->put($payloadKey, $envelope->toArray(), $ttl) ? self::WRITTEN : self::WRITE_FAILED;
+    }
+
+    /** Whether this node currently serves exactly $envelope for the key. */
+    public function holds(Repository $store, string $payloadKey, CacheEnvelope $envelope, bool $coordinated): bool
+    {
+        $current = $this->readEnvelope($store, $payloadKey, $coordinated);
+
+        return $current !== null && hash_equals($envelope->digest(), $current->digest());
+    }
+
+    /**
+     * Evicts this node's copy of the key unless it is newer than $envelope, which a
+     * concurrent sync may have installed and acknowledged meanwhile.
+     */
+    public function evictUnlessNewer(Repository $store, string $payloadKey, CacheEnvelope $envelope, bool $coordinated): bool
+    {
+        $current = $this->readEnvelope($store, $payloadKey, $coordinated);
+
+        if ($current !== null && $current->version > $envelope->version) {
+            return false;
+        }
+
+        $this->forgetEnvelope($store, $payloadKey);
+
+        return true;
     }
 
     /**
@@ -114,7 +190,7 @@ final class HybridLocalCacheService
      * readers already resolve that slot, so re-writing the same pointer does not change the
      * observable layout.
      *
-     * @param array{value: mixed, fresh_until: int, stale_until: int} $payload
+     * @param array{value: mixed, fresh_until: int, stale_until: int, version?: int} $payload
      */
     private function writeEnvelope(Repository $store, string $payloadKey, array $payload, int $ttl, ?string $activeSlot): bool
     {

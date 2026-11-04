@@ -126,7 +126,7 @@ CACHE_STORE=hybrid
 Recommended production setup:
 
 - local store: `apc` backed by APCu for low-latency in-process reads
-- distributed store: `redis`, `memcached`, or `database`, depending on your existing Laravel cache setup
+- distributed store: `redis` (or Valkey), `memcached`, or `database`, depending on your existing Laravel cache setup; counters (`increment`, `decrement`, Laravel's rate limiter) need `redis` or `database`
 - stale window: keep it short and deliberate so stale responses are bounded and understandable
 
 If you want the simplest rollout, start with a TTL and let expiration do the invalidation work. You can add coordinated refresh later without changing the basic read API.
@@ -203,6 +203,11 @@ Behavior summary once you opt into stale serving:
 HybridCache::forget('dashboard:stats');
 ```
 
+`forget` removes the key from the distributed store and from this node's local
+store. A refresh of the key that is already running keeps its lock, so no
+second builder starts, but it can no longer store the value it built. Other
+nodes keep their local copy until it expires or a sync replaces it.
+
 ### Update a key's expiration
 
 ```php
@@ -210,6 +215,38 @@ Cache::store('hybrid')->touch('dashboard:stats', 300);
 ```
 
 `touch` keeps the current distributed value and resets its fresh lifetime to the supplied TTL in both cache layers, without an additional stale window. It returns `false` for missing or expired distributed entries. A zero or negative TTL removes the key.
+
+### Counters
+
+```php
+Cache::store('hybrid')->increment('api:hits');
+Cache::store('hybrid')->decrement('stock:42', 3);
+Cache::store('hybrid')->add('login:attempts', 0, 60); // atomic; seeds a counter
+```
+
+Counters live in the distributed store only. Every node reads the same value,
+and concurrent increments are never lost:
+
+- Each change uses the distributed store's atomic increment. On Redis and
+  Valkey that is a single Lua script.
+- A missing key starts from zero and lives for `stale_ttl` seconds, or 60
+  seconds when `stale_ttl` is 0. The counter and its lifetime are created in
+  the same atomic step.
+- An existing counter keeps its remaining lifetime, so a rate limiter's
+  window is not extended.
+- An integer stored with `put()` or `forever()` is converted into a counter on
+  its first increment. Other values make `increment` return `false` and stay
+  untouched.
+- `add()` is atomic in the distributed store. Laravel's rate limiter uses it
+  together with `increment()`.
+
+Counters need the `redis` (Valkey), `database` or `array` distributed store;
+other stores throw `UnsupportedStoreException` (see
+[Supported backends](#supported-backends)).
+
+A node keeps the local copy that its own `put()` wrote until it expires, or
+until that node increments or forgets the key. Create counters with
+`increment()` or `add()` so every node reads the shared value.
 
 ## Optional coordinated refresh (Programmatic / HTTP / CLI)
 
@@ -366,40 +403,59 @@ data before the change. It waits up to `refresh.publish_wait_seconds`
 and the result is `failed` with reason `lock_timeout` (`--cluster` exits
 non-zero).
 
-Besides the per-node status in `data.nodes`, the result's `data.details` reports
-each node's attempts, last HTTP status, duration, acknowledgement time and the
-node's own failure reason: `superseded` (a newer payload was published; this
-digest is not retried), `changed_during_sync`, `no_fresh_payload`,
-`local_write_failed`, `unreachable` or `http_<status>`.
+Besides the per-node status in `data.nodes`, the result lists the nodes that
+did not acknowledge in `data.failed_nodes`. Pass that list back to
+`syncNodes()` to retry them. `data.details` reports each node's attempts, last
+HTTP status, duration, acknowledgement time and the node's own failure reason:
+
+- `superseded`: a newer payload was published, so this digest is not retried.
+- `changed_during_sync`
+- `local_overwritten`: another worker replaced the copy before the node could
+  verify it.
+- `no_fresh_payload`
+- `local_write_failed`
+- `unreachable`
+- `http_<status>`
 
 The caller sends a **relative signed** URL with the requested key and digest.
-Each node reads the authoritative fresh distributed envelope, writes the
-inactive local slot for coordinated keys, promotes it, and acknowledges the
-digest it actually synchronized. A duplicate notification safely hydrates
-the same payload again. A delayed notification for a superseded digest is
-rejected without writing. If a newer payload is published while a node is
-writing an older one, the node evicts its local copy instead of acknowledging
-it; the older payload stays visible only until that sync's post-write digest
-check completes, and the next read rehydrates from the distributed store. The dispatcher retries each
-node a bounded number of times and returns per-node acknowledgement/failure
-details; partial failure is reported as a failure, **not** cluster success.
+Each node reads the authoritative fresh distributed envelope. It writes the
+inactive local slot for coordinated keys and promotes it. It acknowledges only
+after reading the copy back and confirming that the distributed store still
+publishes the same digest.
 
-**Consistency limits:** delivery is synchronous and best-effort; it is *not*
-a durable queue or atomic cluster-wide cutover. A process crash, disconnected
-node, overlapping write or freshly started node can leave local copies behind.
-Nodes can continue serving previously cached values while propagation is in
-progress. Local hydration on the read path is not version-checked: a read that
-fetched the previous distributed payload just before a publish can write it
-locally after that node acknowledged the newer one; it stays until the next
-sync for the key or until it expires. Distributed writes are ordered by the
-refresh lock, which has no fencing token: a holder stalled for longer than
-`lock_ttl` can still write after its lock expired. A miss that gives up waiting
-for a lock holder builds without the lock but stores its result only if the key
-is still absent, so it never replaces a payload published meanwhile. Re-run `syncNodes` or use a durable retry/reconciliation job in
-production, and use bounded TTLs. For strict cross-node freshness, an
-additional shared-version check, fencing or acknowledgement/barrier protocol
-is necessary (and adds read-path or coordination overhead). This mechanism
-does not make local caching magically strongly consistent.
+- A duplicate notification safely hydrates the same payload again.
+- A delayed notification for a superseded digest is rejected without writing.
+- A node that already holds a newer, still fresh copy keeps it.
+- If a newer payload is published while a node writes an older one, the node
+  evicts its copy instead of acknowledging it. The older payload stays visible
+  only until that sync's post-write check, and the next read rehydrates from
+  the distributed store.
+
+The dispatcher retries each node a bounded number of times and returns
+per-node acknowledgement and failure details. A partial failure is reported as
+a failure, **not** as cluster success. Retrying is idempotent: `syncNodes()`
+reads the current digest on every call, so a retry delivers the payload that
+is published now, never an older one.
+
+**Consistency limits:** delivery is synchronous and best-effort. It is *not*
+a durable queue or an atomic cluster-wide cutover.
+
+- A process crash, a disconnected node or a freshly started node can leave
+  local copies behind, and nodes keep serving their cached values while
+  propagation is in progress.
+- Publications carry versions, and local writes keep a newer, still fresh
+  copy. But the local check and the write are separate steps, because APCu has
+  no compare-and-swap for arrays. A read that hydrates an older payload in the
+  microseconds after a sync verified its copy can still replace it. That copy
+  stays until the next sync for the key or until it expires.
+- A refresh that outlived its lock is fenced off by its lease (see
+  [Behavior guarantees](#behavior-guarantees)).
+
+Recovery is manual: re-run `syncNodes()` for `data.failed_nodes`, or run your
+own durable retry or reconciliation job, and keep TTLs bounded. Strict
+cross-node freshness would need a shared-version check on every read, or an
+acknowledgement barrier, which adds read-path or coordination overhead. This
+mechanism does not make local caching strongly consistent.
 
 ### Optional group versions
 
@@ -410,7 +466,7 @@ $version = HybridCache::groupVersion('dashboard');
 $key = "dashboard:stats:v{$version}";
 ```
 
-Then trigger a group refresh to bump the version (and optionally refresh a subset of hot keys):
+Then trigger a group refresh to bump the version (and optionally refresh a subset of hot keys). An unset version reads as 1, and the first bump returns 2:
 
 ```bash
 php artisan hybrid-cache:refresh --group=dashboard
@@ -445,15 +501,24 @@ Read path:
 
 Optional refresh coordination:
 
-- the distributed store owns the refresh lock
-- if the underlying cache store supports native locks, the package uses them
-- otherwise it falls back to an atomic `add`-style lock key
+- the distributed store owns the refresh lock, through its native lock driver,
+  and only the lock's owner can release it
+- each lock holder gets a lease token. A refresh publishes only while its token
+  is current, so neither a lock that expired mid-build nor a `forget()` lets an
+  older build land
+- distributed stores without native locks are rejected rather than emulated
+  with an `add`-style key, which could release another worker's lock
 
 This keeps the first version small while still covering the critical production case of stale serving plus refresh coordination.
 
 ## Behavior guarantees
 
-These are the invariants the package is designed to uphold. They are verified by the test suite.
+These are the invariants the package is designed to uphold. They are verified
+by the test suite. The concurrency guarantees are also verified against a real
+Valkey server with concurrent processes (see
+[Testing and quality tools](#testing-and-quality-tools)).
+
+### Guaranteed
 
 **The distributed store is the shared source of truth.**
 All nodes read from and write to the same distributed store. Local state is a read-through cache; it caches distributed results for the current node only and is never authoritative.
@@ -467,8 +532,23 @@ Keys use the fast base-key path by default. Pointer keys (`:active`, `:slot:*`) 
 **A corrupt coordinated pointer never breaks a read.**
 If a coordinated key's local pointer holds an invalid value, it is cleared and the read falls back to the base key. If the base key also has no payload, the read returns `null` without throwing.
 
+**Counters do not lose concurrent updates.**
+`increment()`, `decrement()` and `add()` use the distributed store's atomic operations, and every node reads the same counter. A counter is created together with its lifetime in one atomic step, so none is left without an expiry. An existing counter keeps its lifetime.
+
+**A lock is released only by its owner.**
+Refresh locks use the distributed store's native lock driver. A worker whose lock expired cannot release the lock that another worker has acquired since. `forget()` never deletes a lock.
+
+**A refresh does not keep an invalidated value or overwrite a newer publication.**
+Every refresh lock carries a lease token. `forget()` revokes outstanding leases, and the next lock holder replaces the token. A refresh publishes only while its token is current. A build that started before `forget()`, or that outlived its lock, is returned to its caller but not kept in the distributed store. It is skipped when the lease is already lost, and evicted when the lease is lost while it is being written. In that case it is visible for at most that one round trip.
+
 **Stale values do not overwrite fresher state.**
-Stale refreshes are lock-protected. Once a fresh envelope is committed, a concurrent stale path cannot overwrite it because the distributed lock is released only after the fresh payload is written.
+Stale refreshes are lock-protected and fenced by their lease. A deferred stale refresh that finds a payload another worker already refreshed serves that payload instead of rebuilding it.
+
+**A node does not replace a newer local copy with an older payload.**
+Every publication of a key under the refresh lock carries a higher version than the payload it replaces. Read-path hydration and node sync keep a local copy that is still fresh and newer than the incoming payload. Coordinated hydration writes the slot that is active at write time, so it never reverts a promotion.
+
+**A sync is acknowledged only for the payload the node serves.**
+`syncLocal()` acknowledges after reading its local copy back and confirming that the distributed store still publishes the same payload. A partial fan-out is reported as a failure that lists the failed nodes.
 
 **Coordinated refresh always writes to the inactive slot.**
 `coordinatedRefresh()` writes to the slot that is not currently named by the active pointer, then flips the pointer atomically. Readers see the old slot until the flip, then see the new envelope — there is no window where the active slot contains a partially-written payload.
@@ -477,7 +557,41 @@ Stale refreshes are lock-protected. Once a fresh envelope is committed, a concur
 When the local store is hydrated from distributed data, the `fresh_until` and `stale_until` timestamps are copied as-is. A stale distributed envelope is hydrated as stale; a fresh envelope is hydrated as fresh. Hydration never extends or shortens the serveable window.
 
 **Single-store mode is explicitly supported.**
-When `local_store` and `distributed_store` name the same cache driver, the package operates as a single-store stale-while-revalidate cache. Local-only mechanics (active pointers, slot writes) are automatically bypassed. No pointer-specific behavior is required for correctness.
+When `local_store` and `distributed_store` name the same cache driver, the package operates as a single-store stale-while-revalidate cache. Local-only mechanics (active pointers, slot writes) are automatically bypassed. No pointer-specific behavior is required for correctness. The store must still provide native locks (see [Supported backends](#supported-backends)).
+
+### Eventual consistency
+
+- Local copies are not invalidated across nodes. `forget()`, `put()` and counter changes update the distributed store and the local copy of the node that made them. Other nodes serve their local copy until it expires or a sync replaces it.
+- A node keeps the local copy that its own `put()` or `forever()` wrote, even after another node increments the key. The copy stays until it expires, or until that node increments or forgets the key. Create counters with `increment()` or `add()`.
+- `put()`, `forever()` and `touch()` do not revoke refresh leases. A refresh that started before them can still publish after them, so the last writer wins.
+
+### Known limitations
+
+- **No atomic conditional write.** The generic cache API cannot make the lease check and the distributed write one atomic step. A holder that stalls between its pre-write check and its write can expose an outdated payload for about one round trip, until its post-write check evicts it from the distributed store. A reader on another node that fetches it in that round trip can cache it locally until it expires. A Redis-only compare-and-set script could close this window; it is not included.
+- **Local writes are check-then-write.** APCu offers no compare-and-swap for arrays, so the version check and the local write are separate steps. Within that microsecond window, another worker on the same node can still install an older payload over a newer one. `syncLocal()` reports this as `local_overwritten` when it sees it. A read-path hydration that races just after an acknowledged sync is not detected, and lasts until the copy expires or the next sync.
+- **Unlocked writes are ordered by clock.** Version order is exact for publications serialized by the refresh lock. `put()`, `forever()`, `add()` and the unlocked fallback build are stamped with the writer's clock. Under clock skew, a node can skip caching a newer value locally while its own newer-looking copy is fresh. Reads still return the distributed value, and `syncLocal()` resolves the conflict in favour of the distributed store.
+- **Counter conversion races `put()`.** The first increment after `put()` converts the integer under a lock. That is serialized with other increments, but not with a `put()` or `touch()` of the same key at the same moment, so one of those writes can be lost.
+- **Database counters at the expiry instant.** The database store's increment ignores row expiry, so each increment reads the row first, which deletes an expired row. An increment that lands exactly as the row expires, between that read and the update, still adds to the old value once.
+- **Lock release depends on the driver.** Release is atomic for the Redis/Valkey and database lock drivers. The file, Memcached and DynamoDB drivers check the owner and delete in two steps.
+- **Locks without expiry.** A refresh lock taken with `lock: ['seconds' => 0]` never expires, and `forget()` no longer deletes locks. If its holder crashes, release it with `Cache::store('hybrid')->lock('the-key')->forceRelease()`.
+- **Shared lock namespace and reserved keys.** Refresh locks share the `lock:` namespace with `Cache::store('hybrid')->lock()`: a lock named `users` contends with the refresh lock of the key `users`. A refresh is fenced only when its lock holder has a lease: while a plain lock of the same name is held, a miss serves its own build without storing it. Cache keys that start with `lock:`, `group:`, `refresh-epoch:` or `counter-lock:` share storage with the package's own entries, so avoid them.
+
+### Supported backends
+
+| Distributed store | `get` / `put` / `forget` | `flexible`, refresh and publish (need locks) | `increment` / `decrement` |
+| --- | --- | --- | --- |
+| `redis` (Valkey) | yes | yes, release by Lua compare-and-delete | yes, one Lua script; not with a phpredis serializer or compression |
+| `database` | yes | yes | yes |
+| `array` (single process) | yes | yes | yes |
+| `memcached` | yes | yes | no: counters are unsigned and stop at zero |
+| `dynamodb` | yes | yes | no: not verified |
+| `file` | yes | yes | no: the increment is a read-modify-write |
+| `apc`, custom stores without `LockProvider` | yes | no | no |
+
+"No" means the operation throws
+`rajmundtoth0\HybridCache\Exceptions\UnsupportedStoreException` instead of
+running without the guarantee. The `null` store returns `false` from
+`increment`.
 
 ## Testing and quality tools
 
@@ -499,6 +613,20 @@ composer analyse
 composer format
 composer quality
 ```
+
+The Valkey integration tests (`tests/Integration`) run when
+`HYBRID_CACHE_TEST_VALKEY_HOST` is set. They are skipped otherwise. They need
+the phpredis and pcntl extensions and **flush** the selected database (`_DB`,
+default 15):
+
+```bash
+docker run -d --rm --name hybrid-cache-valkey -p 127.0.0.1:6391:6379 valkey/valkey:9.1.2-alpine
+HYBRID_CACHE_TEST_VALKEY_HOST=127.0.0.1 HYBRID_CACHE_TEST_VALKEY_PORT=6391 \
+  php -d apc.enable_cli=1 vendor/bin/pest
+```
+
+Set `HYBRID_CACHE_TEST_VALKEY_CLIENT=predis` to run them through Predis
+(requires `predis/predis`).
 
 Coverage and mutation testing use Xdebug:
 

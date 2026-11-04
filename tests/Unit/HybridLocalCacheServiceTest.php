@@ -167,3 +167,48 @@ it('hydrating a stale envelope preserves its stale semantics in local storage', 
         ->and($stored['fresh_until'])->toBe($now - 10)
         ->and($stored['stale_until'])->toBe($now + 50);
 });
+
+it('installs a payload unless this node holds a newer fresh copy', function (bool $coordinated): void {
+    $service = new HybridLocalCacheService();
+    $store = Cache::store('local-array');
+    $now = time();
+    $key = 'hybrid-cache:install';
+    $older = new CacheEnvelope('older', $now + 60, $now + 60, 1);
+    $newer = new CacheEnvelope('newer', $now + 60, $now + 60, 2);
+
+    expect($service->install($store, $key, $newer, 60, $coordinated, $now))->toBe(HybridLocalCacheService::WRITTEN)
+        ->and($service->install($store, $key, $older, 60, $coordinated, $now))->toBe(HybridLocalCacheService::SUPERSEDED)
+        ->and($service->holds($store, $key, $newer, $coordinated))->toBeTrue()
+        ->and($service->evictUnlessNewer($store, $key, $older, $coordinated))->toBeFalse()
+        ->and($service->holds($store, $key, $newer, $coordinated))->toBeTrue()
+        ->and($service->install($store, $key, $older, 60, $coordinated, $now, replaceNewer: true))->toBe(HybridLocalCacheService::WRITTEN)
+        ->and($service->holds($store, $key, $older, $coordinated))->toBeTrue()
+        ->and($service->evictUnlessNewer($store, $key, $older, $coordinated))->toBeTrue()
+        ->and($service->readEnvelope($store, $key, $coordinated))->toBeNull();
+})->with(['base key' => false, 'coordinated slots' => true]);
+
+it('reports a local write failure when installing', function (): void {
+    $service = new HybridLocalCacheService();
+    $store = new Repository(new \rajmundtoth0\HybridCache\Tests\Support\FailingStore());
+    $envelope = CacheEnvelope::fresh('value', 60, 0, time(), 1);
+
+    expect($service->install($store, 'hybrid-cache:failing', $envelope, 60, false, time()))->toBe(HybridLocalCacheService::WRITE_FAILED)
+        ->and($service->install($store, 'hybrid-cache:failing', $envelope, 60, true, time()))->toBe(HybridLocalCacheService::WRITE_FAILED);
+});
+
+it('hydrates into the slot that is active now, never reverting a promotion', function (): void {
+    $service = new HybridLocalCacheService();
+    $store = Cache::store('local-array');
+    $now = time();
+    $key = 'hybrid-cache:hydrate-slot';
+    $promoted = new CacheEnvelope('promoted', $now + 60, $now + 60, 5);
+    $older = new CacheEnvelope('older', $now + 60, $now + 60, 4);
+
+    $store->put($key.':active', 'a', 60);
+    $service->persistRefreshedEnvelope($store, $key, $promoted, 60);
+
+    // The caller still believes slot "a" is active.
+    expect($service->hydrateEnvelope($store, $key, $older, $now, 'a', true))->toBeFalse()
+        ->and($store->get($key.':active'))->toBe('b')
+        ->and($service->readEnvelope($store, $key, true)?->value)->toBe('promoted');
+});
